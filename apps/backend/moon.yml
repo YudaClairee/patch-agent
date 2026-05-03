@@ -10,6 +10,10 @@ tasks:
     command: "uv run uvicorn src.main:app --reload --port 8000"
     options:
       runInCI: false
+  worker:
+    command: "uv run celery --app src.worker.celery worker --loglevel=info"
+    options:
+      runInCI: false
   lint:
     command: "uv run ruff check ."
   format:
