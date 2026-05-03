@@ -1,8 +1,10 @@
 $schema: "https://moonrepo.dev/schemas/workspace.json"
 
 projects:
-  - "apps/*"
+  client: "apps/frontend"
+  server: "apps/backend"
 
 vcs:
-  manager: "git"
+  client: "git"
   defaultBranch: "main"
+  provider: "github"
