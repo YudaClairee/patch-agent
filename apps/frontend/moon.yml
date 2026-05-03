@@ -1,0 +1,20 @@
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+layer: application
+language: typescript
+
+tasks:
+  dev:
+    command: "pnpm run dev"
+    options:
+      runInCI: false
+  build:
+    command: "pnpm run build"
+  lint:
+    command: "pnpm run lint"
+  format:
+    command: "pnpm run format"
+  test:
+    command: "pnpm run test"
+  typecheck:
+    command: "pnpm exec tsc --noEmit"
