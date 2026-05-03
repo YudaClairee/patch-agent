@@ -31,7 +31,7 @@ Ikuti langkah-langkah di bawah ini untuk setup project di lokal Anda.
 ### 1. Clone Repository
 
 ```bash
-git clone git@github.com:YudaClairee/patch-agent.git
+git clone git@github.com:Hatvim/patch-agent.git
 cd patch-agent
 ```
 
@@ -42,7 +42,8 @@ Copy template environment variable untuk backend:
 ```bash
 cp apps/backend/.env.example apps/backend/.env
 ```
-*(Jangan lupa isi kredensial yang dibutuhkan seperti API Keys di dalam file `.env` tersebut).*
+
+_(Jangan lupa isi kredensial yang dibutuhkan seperti API Keys di dalam file `.env` tersebut)._
 
 ### 3. Jalankan Infrastructure (Database & Redis)
 
@@ -73,17 +74,19 @@ cd ../..
 Gunakan `moon` untuk menjalankan server di lokal. Buka dua terminal terpisah:
 
 **Terminal 1 (Backend):**
+
 ```bash
 moon run backend:dev
 ```
 
 **Terminal 2 (Frontend):**
+
 ```bash
 moon run frontend:dev
 ```
 
-* Frontend dapat diakses di `http://localhost:3000`
-* Backend API dapat diakses di `http://localhost:8000`
+- Frontend dapat diakses di `http://localhost:3000`
+- Backend API dapat diakses di `http://localhost:8000`
 
 ---
 
@@ -92,15 +95,18 @@ moon run frontend:dev
 Berikut adalah command yang berguna selama proses development. Semua command dijalankan dari root directory menggunakan Moon.
 
 ### Frontend (React / Biome)
+
 - `moon run frontend:lint` — Menjalankan linter
 - `moon run frontend:format` — Melakukan formatting kode
 - `moon run frontend:typecheck` — Mengecek TypeScript error
 
 ### Backend (FastAPI / Ruff)
+
 - `moon run backend:lint` — Mengecek error kode Python
 - `moon run backend:format` — Melakukan formatting kode Python
 
 ## 💡 Aturan Kolaborasi (Workflow)
-1. Selalu buat *branch* baru dari `main` untuk setiap fitur/bugfix: `git checkout -b feature/nama-fitur`.
-2. Pastikan tidak ada *error* linter (baik Frontend maupun Backend) sebelum melakukan `git commit`.
-3. Setelah selesai, `push` branch Anda dan buka *Pull Request* di GitHub untuk di-review.
+
+1. Selalu buat _branch_ baru dari `main` untuk setiap fitur/bugfix: `git checkout -b feature/nama-fitur`.
+2. Pastikan tidak ada _error_ linter (baik Frontend maupun Backend) sebelum melakukan `git commit`.
+3. Setelah selesai, `push` branch Anda dan buka _Pull Request_ di GitHub untuk di-review.
