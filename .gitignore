@@ -7,3 +7,8 @@
 .venv
 
 .node-modules
+
+# development
+.claude
+.serena
+.dev
