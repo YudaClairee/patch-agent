@@ -76,13 +76,13 @@ Gunakan `moon` untuk menjalankan server di lokal. Buka dua terminal terpisah:
 **Terminal 1 (Backend):**
 
 ```bash
-moon run backend:dev
+moon run server:dev
 ```
 
 **Terminal 2 (Frontend):**
 
 ```bash
-moon run frontend:dev
+moon run client:dev
 ```
 
 - Frontend dapat diakses di `http://localhost:3000`
@@ -96,14 +96,14 @@ Berikut adalah command yang berguna selama proses development. Semua command dij
 
 ### Frontend (React / Biome)
 
-- `moon run frontend:lint` — Menjalankan linter
-- `moon run frontend:format` — Melakukan formatting kode
-- `moon run frontend:typecheck` — Mengecek TypeScript error
+- `moon run client:lint` — Menjalankan linter
+- `moon run client:format` — Melakukan formatting kode
+- `moon run client:typecheck` — Mengecek TypeScript error
 
 ### Backend (FastAPI / Ruff)
 
-- `moon run backend:lint` — Mengecek error kode Python
-- `moon run backend:format` — Melakukan formatting kode Python
+- `moon run server:lint` — Mengecek error kode Python
+- `moon run server:format` — Melakukan formatting kode Python
 
 ## 💡 Aturan Kolaborasi (Workflow)
 

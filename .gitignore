@@ -12,3 +12,6 @@
 .claude
 .serena
 .dev
+
+__pycache__
+
