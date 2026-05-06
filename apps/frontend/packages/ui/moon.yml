@@ -1,0 +1,20 @@
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+layer: "library"
+language: "typescript"
+stack: "frontend"
+
+tasks:
+  check:
+    command: "pnpm run check"
+    inputs:
+      - "package.json"
+      - "tsconfig.json"
+      - "/apps/frontend/biome.json"
+      - "src/**/*"
+  typecheck:
+    command: "pnpm run typecheck"
+    inputs:
+      - "package.json"
+      - "tsconfig.json"
+      - "src/**/*"

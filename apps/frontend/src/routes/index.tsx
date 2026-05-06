@@ -1,14 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createRouter, RouterProvider } from "@tanstack/react-router";
+import { routeTree } from "./route-tree";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const router = createRouter({
+  routeTree,
+});
 
-function Home() {
-  return (
-    <div className="p-8">
-      <h1 className="text-4xl font-bold">Welcome to TanStack Start</h1>
-      <p className="mt-4 text-lg">
-        Edit <code>src/routes/index.tsx</code> to get started yow.
-      </p>
-    </div>
-  );
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+}
+
+export function AppRouter() {
+  return <RouterProvider router={router} />;
 }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 772 824" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:1.5;">
+    <g transform="matrix(1,0,0,1,-3768,0)">
+        <g id="Papan-Karya3" serif:id="Papan Karya3" transform="matrix(0.218573,0,0,1,2944.368572,0)">
+            <rect x="3768.22" y="0" width="3532" height="824" style="fill:none;"/>
+            <g transform="matrix(0.327755,0,0,0.071638,3984.065491,80.917778)">
+                <path d="M514,4478.554L514,1212.344L1334.344,392L7069.408,392L7069.408,2030.469L8707.877,2030.469L8707.877,4478.554L7877.492,5308.939L2154,5308.939L2154,8585.877L514,8585.877L514,5307.408L1342.854,5307.408L514,4478.554ZM7067.877,2032L2154,2032L2154,3668.939L7067.877,3668.939L7067.877,2032Z" style="stroke:black;stroke-width:58.16px;"/>
+            </g>
+            <g transform="matrix(6.978523,0,0,1.525317,2467.157869,-510.939987)">
+                <circle cx="446" cy="756" r="39"/>
+            </g>
+        </g>
+    </g>
+</svg>
