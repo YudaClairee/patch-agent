@@ -13,11 +13,9 @@ def test_get_code_context_raises_on_blocked(tmp_path: Path) -> None:
     with pytest.raises(PermissionError):
         get_code_context(str(tmp_path), ".env")
 
-@patch("src.ai.tools.rag_tools._get_chroma_client")
-def test_search_code_raises_when_collection_missing(mock_chroma: MagicMock) -> None:
-    mock_client = MagicMock()
+@patch("src.ai.tools.rag_tools._chroma_client")
+def test_search_code_raises_when_collection_missing(mock_client: MagicMock) -> None:
     mock_client.get_collection.side_effect = Exception("Collection not found")
-    mock_chroma.return_value = mock_client
 
     with pytest.raises(FileNotFoundError):
         search_code("login", "repo_123", "main")

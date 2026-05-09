@@ -10,9 +10,10 @@ IGNORED_PATHS: list[str] = [
     ".git", "node_modules", ".venv", "dist", "build",
     ".env", ".env.local", ".pem", ".key", ".png", ".jpg", ".zip",
 ]
+_CHROMA_PATH = str(Path(".data/chromadb").resolve())
+_chroma_client = chromadb.PersistentClient(path=_CHROMA_PATH)
 
-def _get_chroma_client() -> chromadb.ClientAPI:
-    return chromadb.PersistentClient(path=".data/chromadb")
+_chunker = SemanticChunker(embedding_model="minishlab/potion-base-32M", chunk_size=256, threshold=0.5)
 
 def _get_embedding(text: str) -> list[float]:
     client = OpenAI(
@@ -30,18 +31,15 @@ def _should_ignore(file_path: str) -> bool:
 
 def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict[str, str]:
     """Index all source code files in the workspace into ChromaDB."""
-    client = _get_chroma_client()
     collection_name = f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
 
     try:
-        client.delete_collection(collection_name)
+        _chroma_client.delete_collection(collection_name)
     except Exception:
         pass
 
-    collection: Collection = client.create_collection(collection_name)
+    collection: Collection = _chroma_client.create_collection(collection_name)
     base = Path(workspace_path)
-    
-    chunker = SemanticChunker(embedding_model="minishlab/potion-base-8M", chunk_size=512)
     
     indexed = 0
     documents, embeddings, metadatas, ids = [], [], [], []
@@ -58,17 +56,15 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
             if not content.strip():
                 continue
                 
-            chunks = chunker.chunk(content)
+            chunks = _chunker.chunk(content)
             
             for i, chunk in enumerate(chunks):
                 if not chunk.text.strip():
                     continue
                 
                 chunk_id = f"{repository_id}_{rel_path}_{i}"
-                embedding = _get_embedding(chunk.text)
-                
                 documents.append(chunk.text)
-                embeddings.append(embedding)
+                embeddings.append(_get_embedding(chunk.text))
                 metadatas.append({
                     "repository_id": repository_id,
                     "branch": branch,
@@ -93,11 +89,10 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
 
 def search_code(query: str, repository_id: str, branch: str, n_results: int = 5) -> dict[str, list[dict]]:
     """Search for relevant code snippets in the indexed repository."""
-    client = _get_chroma_client()
     collection_name = f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
 
     try:
-        collection = client.get_collection(collection_name)
+        collection = _chroma_client.get_collection(collection_name)
     except Exception:
         raise FileNotFoundError("Collection not found. Codebase indexing is required.")
 
