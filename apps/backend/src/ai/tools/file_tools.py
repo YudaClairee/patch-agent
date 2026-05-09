@@ -1,62 +1,60 @@
 from pathlib import Path
-from typing import Dict, List
-from langfuse.decorators import observe
 
-BLOCKED_FILES = {".env", ".env.local", "id_rsa", "id_ed25519"}
-BLOCKED_EXTENSIONS = {".pem", ".key", ".sqlite3"}
+_BLOCKED_PATTERNS: list[str] = [
+    ".env", ".env.local", "id_rsa", "id_ed25519",
+    "secrets.", ".pem", ".key",
+]
 
-def _is_safe(path: Path) -> bool:
-    if path.name in BLOCKED_FILES or any(path.name.startswith("secret") for f in [".env"]):
-        return False
-    if path.suffix in BLOCKED_EXTENSIONS:
-        return False
-    return True
+def _is_blocked(file_path: str) -> bool:
+    for pattern in _BLOCKED_PATTERNS:
+        if pattern in file_path:
+            return True
+    return False
 
-@observe()
-def list_files(workspace_path: str) -> Dict[str, List[str]]:
-    """Melihat struktur file dan direktori dalam workspace."""
-    root = Path(workspace_path)
-    if not root.exists():
-        raise FileNotFoundError(f"Workspace path {workspace_path} tidak ditemukan.")
-        
-    files = []
-    for f in root.rglob("*"):
-        if f.is_file() and _is_safe(f):
-            rel = str(f.relative_to(root))
-            if any(part in rel for part in [".git", ".venv", "node_modules", "__pycache__"]):
-                continue
-            files.append(rel)
-    return {"files": sorted(files)}
+def list_files(workspace_path: str) -> dict[str, list[str] | int]:
+    """List all files in the workspace directory."""
+    base = Path(workspace_path)
+    if not base.exists():
+        raise FileNotFoundError(f"Path {workspace_path} does not exist.")
 
-@observe()
-def read_file(workspace_path: str, file_path: str) -> Dict[str, str]:
-    """Membaca isi file spesifik di dalam workspace."""
-    target = Path(workspace_path) / file_path
-    if not _is_safe(target):
-         raise PermissionError(f"Akses ditolak: File {file_path} diblokir oleh sistem.")
-    if not target.exists():
-         raise FileNotFoundError(f"File {file_path} tidak ditemukan.")
-    return {"content": target.read_text(encoding="utf-8", errors="replace")}
+    files: list[str] = []
+    for f in base.rglob("*"):
+        if f.is_file():
+            rel = str(f.relative_to(base))
+            if not _is_blocked(rel):
+                files.append(rel)
 
-@observe()
-def write_file(workspace_path: str, file_path: str, content: str) -> Dict[str, str]:
-    """Menulis atau menimpa konten ke dalam file."""
-    target = Path(workspace_path) / file_path
-    if not _is_safe(target):
-         raise PermissionError(f"Akses ditolak: Tidak dapat menulis ke {file_path}.")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
-    return {"status": "success", "path": file_path}
+    return {"files": files, "count": len(files)}
 
-@observe()
-def search_file(workspace_path: str, pattern: str) -> Dict[str, List[str]]:
-    """Mencari file berdasarkan nama atau pola ekstensi."""
-    root = Path(workspace_path)
-    matches = []
-    for f in root.rglob(f"*{pattern}*"):
-        if f.is_file() and _is_safe(f):
-            rel = str(f.relative_to(root))
-            if any(part in rel for part in [".git", ".venv", "node_modules"]):
-                continue
-            matches.append(rel)
-    return {"matches": matches}
+def read_file(workspace_path: str, file_path: str) -> dict[str, str]:
+    """Read the content of a specific file."""
+    if _is_blocked(file_path):
+        raise PermissionError(f"Access to {file_path} is blocked for security reasons.")
+
+    full_path = Path(workspace_path) / file_path
+    if not full_path.exists():
+        raise FileNotFoundError(f"File {file_path} not found.")
+
+    content = full_path.read_text(encoding="utf-8", errors="replace")
+    return {"file_path": file_path, "content": content}
+
+def write_file(workspace_path: str, file_path: str, content: str) -> dict[str, str]:
+    """Write or overwrite content to a specific file."""
+    if _is_blocked(file_path):
+        raise PermissionError(f"Writing to {file_path} is blocked for security reasons.")
+
+    full_path = Path(workspace_path) / file_path
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_text(content, encoding="utf-8")
+    return {"status": "success", "file_path": file_path}
+
+def search_file(workspace_path: str, pattern: str) -> dict[str, list[str] | int]:
+    """Search for files by name pattern."""
+    base = Path(workspace_path)
+    matches: list[str] = []
+
+    for f in base.rglob(f"*{pattern}*"):
+        if f.is_file() and not _is_blocked(str(f.relative_to(base))):
+            matches.append(str(f.relative_to(base)))
+
+    return {"matches": matches, "count": len(matches)}
