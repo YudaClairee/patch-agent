@@ -55,8 +55,8 @@ All checks passed!`}</pre>
               <FileRow path="tests/test_auth.py" additions="+82" deletions="-0" />
               <FileRow path="app/auth/routes.py" additions="+4" deletions="-1" />
             </div>
-            <Button className="mt-5 w-full" onClick={() => setActive("pr")}>
-              Open Pull Request
+            <Button className="mt-5 w-full" onClick={() => setActive("diff")}>
+              Open Diff Review
             </Button>
           </Card>
         </div>

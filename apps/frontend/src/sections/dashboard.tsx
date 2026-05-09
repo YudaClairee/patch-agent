@@ -65,7 +65,7 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
               <button
                 key={run.task}
                 type="button"
-                onClick={() => setActive(run.status === "succeeded" ? "pr" : "run")}
+                onClick={() => setActive(run.status === "succeeded" ? "diff" : "run")}
                 className="flex w-full items-center justify-between gap-4 rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-left transition hover:bg-[var(--patch-surface)]"
               >
                 <div className="min-w-0">

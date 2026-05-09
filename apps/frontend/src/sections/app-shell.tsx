@@ -105,9 +105,9 @@ export function AppShell({
               </div>
 
               <div className="flex flex-wrap gap-2 xl:justify-end">
-                <Button variant="chip" onClick={() => setActive("pr")}>
+                <Button variant="chip" onClick={() => setActive("diff")}>
                   <ShieldCheck size={15} />
-                  Pull Request
+                  Diff Review
                 </Button>
                 <Button variant="secondary" onClick={() => setActive("run")}>
                   <Activity size={15} />

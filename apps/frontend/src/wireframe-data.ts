@@ -6,6 +6,7 @@ export const screens = [
   { id: "repo", label: "Repository" },
   { id: "task", label: "New Task" },
   { id: "run", label: "Agent Run" },
+  { id: "diff", label: "Diff Review" },
   { id: "pr", label: "PR Result" },
 ] as const;
 
@@ -18,6 +19,7 @@ export const screenRoutes = {
   repo: "/repo",
   task: "/task",
   run: "/run",
+  diff: "/diff",
   pr: "/pr",
 } as const satisfies Record<ScreenId, string>;
 
@@ -86,6 +88,10 @@ export const screenMeta: Record<ScreenId, { title: string; subtitle: string }> =
   run: {
     title: "Agent Run",
     subtitle: "Live tool-call timeline and final pull request handoff.",
+  },
+  diff: {
+    title: "Diff Review",
+    subtitle: "Inspect the agent's pull request and request follow-up changes.",
   },
   pr: {
     title: "PR Result",

@@ -32,6 +32,19 @@ class AgentRun(SQLModel, table=True):
         sa_column=Column(SAEnum(RunStatus, name="run_status"), nullable=False)
     )
 
+    parent_run_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    follow_up_instruction: str | None = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+
     container_id: str | None = Field(default=None, max_length=128)
     container_image: str | None = Field(default=None, max_length=512)
     branch_name: str | None = Field(default=None, max_length=255)
