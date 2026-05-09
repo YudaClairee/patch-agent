@@ -9,6 +9,7 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 IGNORED_PATHS: list[str] = [
     ".git", "node_modules", ".venv", "dist", "build",
     ".env", ".env.local", ".pem", ".key", ".png", ".jpg", ".zip",
+    "__pycache__", ".pyc", ".DS_Store", ".pytest_cache"
 ]
 _CHROMA_PATH = str(Path(".data/chromadb").resolve())
 _chroma_client = chromadb.PersistentClient(path=_CHROMA_PATH)
@@ -50,13 +51,15 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
         rel_path = str(file_path.relative_to(base))
         if _should_ignore(rel_path):
             continue
+
+        print(f"Indexing: {rel_path}...")
             
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
             if not content.strip():
                 continue
                 
-            chunks = _chunker.chunk(content)
+            chunks = _chunker.chunk(text=content)
             
             for i, chunk in enumerate(chunks):
                 if not chunk.text.strip():

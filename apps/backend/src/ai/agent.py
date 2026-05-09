@@ -1,11 +1,17 @@
 import os
 import json
+import base64
 from typing import AsyncIterator
-from agno.agent import Agent, ModelSettings
-from agno.models.litellm import LitellmModel
+from agno.agent import Agent
+from agno.models.litellm import LiteLLM 
 from agno.tools import tool
+
 from opentelemetry import trace
-from langfuse.opentelemetry import configure_opentelemetry
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from openinference.instrumentation.litellm import LiteLLMInstrumentor
+
 from src.core.config import settings
 from src.ai.tools import (
     list_files, read_file, write_file, search_file,
@@ -14,12 +20,19 @@ from src.ai.tools import (
     index_codebase, search_code, get_code_context
 )
 
-configure_opentelemetry(
-    trace_name="patch_agent_run",
-    langfuse_public_key=settings.langfuse_public_key,
-    langfuse_secret_key=settings.langfuse_secret_key,
-    langfuse_host=settings.langfuse_host,
+langfuse_auth = base64.b64encode(
+    f"{settings.langfuse_public_key}:{settings.langfuse_secret_key}".encode()
+).decode()
+
+exporter = OTLPSpanExporter(
+    endpoint=f"{settings.langfuse_host}/api/public/otel/v1/traces",
+    headers={"Authorization": f"Basic {langfuse_auth}"},
 )
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(exporter))
+trace.set_tracer_provider(provider)
+
+LiteLLMInstrumentor().instrument(tracer_provider=provider)
 tracer = trace.get_tracer(__name__)
 
 os.environ["OPENROUTER_API_KEY"] = settings.openrouter_api_key
@@ -45,7 +58,7 @@ Rules:
 """
 
 def _build_agent(workspace_path: str, repository_id: str, branch: str) -> Agent:
-    model = LitellmModel(
+    model = LiteLLM(
         id="openrouter/google/gemini-2.0-flash-001",
         api_key=settings.openrouter_api_key,
         base_url=settings.openrouter_base_url,
@@ -136,8 +149,7 @@ def _build_agent(workspace_path: str, repository_id: str, branch: str) -> Agent:
             workspace_run_command, workspace_run_test, workspace_run_lint,
             codebase_search_code, codebase_get_code_context, codebase_index,
         ],
-        show_tool_calls=True,
-        model_settings=ModelSettings(include_usage=True),
+        show_tool_calls=True
     )
 
 async def run_agent_stream(
@@ -156,7 +168,6 @@ async def run_agent_stream(
         
         try:
             async for event in agent.run_stream(message=instruction, max_turns=15):
-                
                 if hasattr(event, "content") and event.content:
                     yield f"data: {json.dumps({'type': 'text_delta', 'content': event.content})}\n\n"
                 
