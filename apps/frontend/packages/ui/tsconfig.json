@@ -6,14 +6,6 @@
     "jsx": "react-jsx",
     "module": "ESNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
-
-    "paths": {
-      "#/*": ["./src/*"],
-      "@/*": ["./src/*"],
-      "@patch/ui": ["./packages/ui/src/index.ts"],
-      "@patch/ui/*": ["./packages/ui/src/*"]
-    },
 
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

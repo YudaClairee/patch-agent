@@ -1,7 +1,8 @@
 $schema: "https://moonrepo.dev/schemas/project.json"
 
-layer: application
-language: typescript
+layer: "application"
+language: "typescript"
+stack: "frontend"
 
 tasks:
   dev:
@@ -10,11 +11,42 @@ tasks:
       runInCI: false
   build:
     command: "pnpm run build"
-  lint:
-    command: "pnpm run lint"
-  format:
-    command: "pnpm run format"
-  test:
-    command: "pnpm run test"
+    deps:
+      - "ui:check"
+      - "ui:typecheck"
+      - "~:typecheck"
+      - "~:check"
+    inputs:
+      - "index.html"
+      - "package.json"
+      - "tsconfig.json"
+      - "vite.config.mjs"
+      - "public/**/*"
+      - "src/**/*"
+      - "packages/ui/src/**/*"
+      - "packages/ui/package.json"
+      - "packages/ui/tsconfig.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "biome.json"
+    outputs:
+      - "dist"
+  preview:
+    command: "pnpm run preview"
+    options:
+      runInCI: false
   typecheck:
-    command: "pnpm exec tsc --noEmit"
+    command: "tsc --noEmit"
+    inputs:
+      - "package.json"
+      - "tsconfig.json"
+      - "src/**/*"
+      - "packages/ui/src/**/*"
+  check:
+    command: "biome check ."
+    inputs:
+      - "package.json"
+      - "biome.json"
+      - "index.html"
+      - "src/**/*"
+      - "packages/ui/src/**/*"

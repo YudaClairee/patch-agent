@@ -1,0 +1,27 @@
+{
+  "name": "@patch/ui",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Shared P.A.T.C.H. UI primitives, tokens, and class utilities.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "check": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "lucide-react": "^1.14.0",
+    "react": "^19.2.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "typescript": "^6.0.3"
+  }
+}
