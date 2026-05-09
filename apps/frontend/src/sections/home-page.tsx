@@ -67,7 +67,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
             <button
               key={run.task}
               type="button"
-              onClick={() => setActive(run.status === "review_required" ? "diff" : "run")}
+              onClick={() => setActive(run.status === "succeeded" ? "pr" : "run")}
               className="flex w-full items-start gap-3 rounded-[10px] px-2 py-2 text-left hover:bg-[var(--patch-surface)]"
             >
               <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[var(--patch-muted)]" />
@@ -250,7 +250,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
                   <button
                     type="button"
                     aria-label="Open review"
-                    onClick={() => setActive("diff")}
+                    onClick={() => setActive("pr")}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--patch-ink)] text-white"
                   >
                     <ArrowRight size={18} />
@@ -302,7 +302,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
                   <FileRow path="app/auth/routes.py" additions="+4" deletions="-1" />
                 </div>
                 <div className="mt-5 grid gap-3">
-                  <Button onClick={() => setActive("diff")}>
+                  <Button onClick={() => setActive("pr")}>
                     <FileCode2 size={15} />
                     Open Diff
                   </Button>

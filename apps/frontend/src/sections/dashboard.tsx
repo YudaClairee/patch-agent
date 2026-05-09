@@ -9,7 +9,7 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
       <div className="grid gap-4 md:grid-cols-4">
         <Metric icon={<FolderGit />} label="Repositories" value={String(workspaceSummary.repositoryCount)} />
         <Metric icon={<Activity />} label="Active Runs" value={String(workspaceSummary.activeRunCount)} />
-        <Metric icon={<FileCode2 />} label="Diff Ready" value={String(workspaceSummary.reviewRequiredCount)} />
+        <Metric icon={<FileCode2 />} label="Succeeded" value={String(workspaceSummary.succeededCount)} />
         <Metric icon={<GitPullRequest />} label="PR Created" value={String(workspaceSummary.pullRequestCount)} />
       </div>
 
@@ -65,7 +65,7 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
               <button
                 key={run.task}
                 type="button"
-                onClick={() => setActive(run.status === "review_required" ? "diff" : "run")}
+                onClick={() => setActive(run.status === "succeeded" ? "pr" : "run")}
                 className="flex w-full items-center justify-between gap-4 rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-left transition hover:bg-[var(--patch-surface)]"
               >
                 <div className="min-w-0">

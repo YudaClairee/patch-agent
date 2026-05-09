@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { AgentRun } from "../sections/agent-run";
 import { AppShell } from "../sections/app-shell";
 import { Dashboard } from "../sections/dashboard";
-import { DiffReview } from "../sections/diff-review";
 import { HomePage } from "../sections/home-page";
 import { NewTask } from "../sections/new-task";
 import { PRResult } from "../sections/pr-result";
@@ -38,7 +37,6 @@ export default function ScreenView({ initialScreen = "home" }: ScreenViewProps) 
       {active === "repo" && <RepositorySetup setActive={navigateToScreen} />}
       {active === "task" && <NewTask setActive={navigateToScreen} />}
       {active === "run" && <AgentRun setActive={navigateToScreen} />}
-      {active === "diff" && <DiffReview setActive={navigateToScreen} />}
       {active === "pr" && <PRResult />}
     </AppShell>
   );

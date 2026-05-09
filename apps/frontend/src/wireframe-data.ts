@@ -6,7 +6,6 @@ export const screens = [
   { id: "repo", label: "Repository" },
   { id: "task", label: "New Task" },
   { id: "run", label: "Agent Run" },
-  { id: "diff", label: "Diff Review" },
   { id: "pr", label: "PR Result" },
 ] as const;
 
@@ -19,7 +18,6 @@ export const screenRoutes = {
   repo: "/repo",
   task: "/task",
   run: "/run",
-  diff: "/diff",
   pr: "/pr",
 } as const satisfies Record<ScreenId, string>;
 
@@ -30,9 +28,9 @@ export const repoRows = [
 ];
 
 export const recentRuns = [
-  { task: "Add unit tests for login endpoint", repo: "fastapi-auth-app", status: "review_required" },
-  { task: "Fix navbar responsive bug", repo: "patch-web", status: "verifying" },
-  { task: "Refactor product service", repo: "mini-ecommerce-api", status: "pr_created" },
+  { task: "Add unit tests for login endpoint", repo: "fastapi-auth-app", status: "running" },
+  { task: "Fix navbar responsive bug", repo: "patch-web", status: "running" },
+  { task: "Refactor product service", repo: "mini-ecommerce-api", status: "succeeded" },
 ];
 
 export type SetActiveProps = {
@@ -42,7 +40,7 @@ export type SetActiveProps = {
 export type WorkspaceSummary = {
   repositoryCount: number;
   activeRunCount: number;
-  reviewRequiredCount: number;
+  succeededCount: number;
   pullRequestCount: number;
   verificationStatus: string;
   usageLabel: string;
@@ -50,10 +48,10 @@ export type WorkspaceSummary = {
 
 const workspaceSummary: WorkspaceSummary = {
   repositoryCount: repoRows.length,
-  activeRunCount: recentRuns.filter((run) => run.status !== "pr_created").length,
-  reviewRequiredCount: recentRuns.filter((run) => run.status === "review_required").length,
+  activeRunCount: recentRuns.filter((run) => run.status === "running").length,
+  succeededCount: recentRuns.filter((run) => run.status === "succeeded").length,
   pullRequestCount: 7,
-  verificationStatus: "pytest passed - ruff passed - review required",
+  verificationStatus: "agent autonomous - tests gated - PR auto-opened",
   usageLabel: "Daily agent run usage (6/15)",
 };
 
@@ -66,25 +64,16 @@ export function useWorkspaceSummary() {
   });
 }
 
-export const statusSteps = [
-  "queued",
-  "preparing_workspace",
-  "cloning_repo",
-  "indexing",
-  "planning",
-  "executing",
-  "verifying",
-  "review_required",
-] as const;
+export const statusSteps = ["queued", "running", "succeeded", "failed"] as const;
 
 export const screenMeta: Record<ScreenId, { title: string; subtitle: string }> = {
   home: {
     title: "P.A.T.C.H. Home",
-    subtitle: "Chat with the coding agent, inspect repository context, and keep review control before PR handoff.",
+    subtitle: "Submit a coding task and let the autonomous agent open the pull request.",
   },
   dashboard: {
     title: "Operations",
-    subtitle: "Live workspace for repositories, runs, diff gates, and pull request output.",
+    subtitle: "Live workspace for repositories, runs, and pull request output.",
   },
   repo: {
     title: "Repository Setup",
@@ -92,18 +81,14 @@ export const screenMeta: Record<ScreenId, { title: string; subtitle: string }> =
   },
   task: {
     title: "New Coding Task",
-    subtitle: "Target context and instruction editor for the next agent run.",
+    subtitle: "Target context and instruction for the next agent run.",
   },
   run: {
     title: "Agent Run",
-    subtitle: "Queue state, execution plan, command logs, and changed files.",
-  },
-  diff: {
-    title: "Diff Review",
-    subtitle: "Inspect generated changes before creating the pull request.",
+    subtitle: "Live tool-call timeline and final pull request handoff.",
   },
   pr: {
     title: "PR Result",
-    subtitle: "Final branch, verification badges, and GitHub pull request link.",
+    subtitle: "Final branch and GitHub pull request link.",
   },
 };
