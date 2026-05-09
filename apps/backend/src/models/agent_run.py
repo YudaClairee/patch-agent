@@ -1,8 +1,9 @@
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Text, func
+from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Numeric, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -10,11 +11,9 @@ from src.models.enums import RunStatus
 
 if TYPE_CHECKING:
     from src.models.agent_run_event import AgentRunEvent
-    from src.models.file_change import FileChange
     from src.models.pull_request import PullRequest
     from src.models.task import Task
     from src.models.tool_call import ToolCall
-    from src.models.verification_check import VerificationCheck
 
 
 class AgentRun(SQLModel, table=True):
@@ -39,9 +38,13 @@ class AgentRun(SQLModel, table=True):
     celery_task_id: str | None = Field(default=None, max_length=128)
 
     model_id: str = Field(max_length=255)
+    prompt_version: str = Field(default="v1", max_length=32, nullable=False)
     max_turns: int = Field(default=15, nullable=False)
     total_tool_calls: int | None = Field(default=None)
     total_tokens: int | None = Field(default=None)
+    cost_usd: Decimal | None = Field(
+        default=None, sa_column=Column(Numeric(10, 4), nullable=True)
+    )
     error_message: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True)
     )
@@ -64,14 +67,6 @@ class AgentRun(SQLModel, table=True):
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     tool_calls: list["ToolCall"] = Relationship(
-        back_populates="agent_run",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
-    )
-    file_changes: list["FileChange"] = Relationship(
-        back_populates="agent_run",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
-    )
-    verification_checks: list["VerificationCheck"] = Relationship(
         back_populates="agent_run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
