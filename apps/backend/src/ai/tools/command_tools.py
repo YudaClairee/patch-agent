@@ -3,7 +3,7 @@ import shlex
 
 ALLOWED_COMMANDS: list[str] = [
     "uv", "pytest", "ruff", "pnpm", "npm", "git",
-    "python", "pip", "ls", "cat", "echo", "pwd",
+    "ls", "cat", "echo", "pwd",
 ]
 
 BLOCKED_TERMS: list[str] = [
