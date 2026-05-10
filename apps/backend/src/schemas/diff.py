@@ -1,9 +1,10 @@
+from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 
 class DiffFileRead(BaseModel):
     file_path: str
-    status: str          # "added" | "removed" | "modified" | "renamed"
+    status: Literal["added", "removed", "modified", "renamed"]
     additions: int
     deletions: int
     patch: str | None    # unified diff text

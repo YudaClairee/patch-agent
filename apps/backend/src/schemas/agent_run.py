@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_serializer
 from src.models.enums import RunStatus
 from src.schemas.tool_call import ToolCallRead
 from src.schemas.pull_request import PullRequestRead
@@ -29,3 +29,9 @@ class AgentRunRead(BaseModel):
     pull_request: PullRequestRead | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("cost_usd")
+    def serialize_cost_usd(self, cost_usd: Decimal | None, _info) -> str | None:
+        if cost_usd is None:
+            return None
+        return str(cost_usd)
