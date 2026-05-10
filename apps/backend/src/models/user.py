@@ -18,6 +18,7 @@ class User(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     email: str = Field(index=True, unique=True, max_length=320)
     name: str | None = Field(default=None, max_length=255)
+    hashed_password: str = Field(max_length=1024)
     daily_run_quota: int = Field(default=15, nullable=False)
 
     created_at: datetime = Field(
