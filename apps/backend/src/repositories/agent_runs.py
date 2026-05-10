@@ -1,20 +1,82 @@
 import uuid
-from sqlmodel import Session, select
+
 from sqlalchemy.orm import selectinload
+from sqlmodel import Session, select
+
 from src.models.agent_run import AgentRun
 from src.models.agent_run_event import AgentRunEvent
-from src.models.pull_request import PullRequest
 from src.models.enums import RunStatus
+from src.models.pull_request import PullRequest
+from src.models.task import Task
 from src.schemas.task import TaskCreate
 
 
-def create_agent_run(session: Session, task_id: uuid.UUID, data: TaskCreate) -> AgentRun:
-    """
-    Creates a new AgentRun in 'queued' status.
-    Inherits branch_name and model_id from parent run if parent_run_id is provided.
-    """
+def get_agent_run_for_user(
+    session: Session, run_id: uuid.UUID, user_id: uuid.UUID
+) -> AgentRun | None:
+    statement = (
+        select(AgentRun)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(AgentRun.id == run_id, Task.user_id == user_id)
+        .options(
+            selectinload(AgentRun.tool_calls),
+            selectinload(AgentRun.pull_request),
+        )
+    )
+    return session.exec(statement).first()
+
+
+def get_agent_run_detail_for_user(
+    session: Session, run_id: uuid.UUID, user_id: uuid.UUID
+) -> AgentRun | None:
+    return get_agent_run_for_user(session, run_id, user_id)
+
+
+def list_events_for_user(
+    session: Session,
+    run_id: uuid.UUID,
+    user_id: uuid.UUID,
+    limit: int = 50,
+) -> list[AgentRunEvent] | None:
+    ownership_statement = (
+        select(AgentRun.id)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(AgentRun.id == run_id, Task.user_id == user_id)
+    )
+    if not session.exec(ownership_statement).first():
+        return None
+
+    if limit > 100:
+        limit = 100
+
+    statement = (
+        select(AgentRunEvent)
+        .where(AgentRunEvent.agent_run_id == run_id)
+        .order_by(AgentRunEvent.sequence.asc())
+        .limit(limit)
+    )
+    return list(session.exec(statement).all())
+
+
+def get_pull_request_for_run_for_user(
+    session: Session, run_id: uuid.UUID, user_id: uuid.UUID
+) -> PullRequest | None:
+    ownership_statement = (
+        select(AgentRun.id)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(AgentRun.id == run_id, Task.user_id == user_id)
+    )
+    if not session.exec(ownership_statement).first():
+        return None
+
+    return get_pull_request_for_run(session, run_id)
+
+
+def create_agent_run(
+    session: Session, task_id: uuid.UUID, data: TaskCreate
+) -> AgentRun:
     branch_name = None
-    model_id = "claude-3-5-sonnet-20241022"  # Default model
+    model_id = "anthropic/claude-sonnet-4.6"
     follow_up_instruction = data.follow_up_instruction
 
     if data.parent_run_id:
@@ -36,15 +98,11 @@ def create_agent_run(session: Session, task_id: uuid.UUID, data: TaskCreate) -> 
         max_turns=15,
     )
     session.add(run)
-    session.commit()
-    session.refresh(run)
+    session.flush()
     return run
 
 
 def get_agent_run(session: Session, run_id: uuid.UUID) -> AgentRun | None:
-    """
-    Retrieves an agent run by ID, including nested tool calls and pull request.
-    """
     statement = (
         select(AgentRun)
         .where(AgentRun.id == run_id)
@@ -56,26 +114,36 @@ def get_agent_run(session: Session, run_id: uuid.UUID) -> AgentRun | None:
     return session.exec(statement).first()
 
 
-def list_events(session: Session, run_id: uuid.UUID) -> list[AgentRunEvent]:
-    """
-    Lists all events for a run, ordered by sequence.
-    """
+def list_events(
+    session: Session, run_id: uuid.UUID, limit: int = 50
+) -> list[AgentRunEvent]:
+    if limit > 100:
+        limit = 100
     statement = (
         select(AgentRunEvent)
         .where(AgentRunEvent.agent_run_id == run_id)
         .order_by(AgentRunEvent.sequence.asc())
+        .limit(limit)
     )
     return list(session.exec(statement).all())
 
 
-def get_pull_request_for_run(session: Session, run_id: uuid.UUID) -> PullRequest | None:
-    """
-    Finds the PullRequest associated with a run.
-    If the run is a follow-up, it walks the parent chain to find the PR.
-    """
+def get_pull_request_for_run(
+    session: Session, run_id: uuid.UUID
+) -> PullRequest | None:
+    seen_run_ids: set[uuid.UUID] = set()
     current_run_id = run_id
-    while current_run_id:
-        statement = select(PullRequest).where(PullRequest.agent_run_id == current_run_id)
+    max_depth = 50
+    depth = 0
+
+    while current_run_id and depth < max_depth:
+        if current_run_id in seen_run_ids:
+            break
+        seen_run_ids.add(current_run_id)
+
+        statement = select(PullRequest).where(
+            PullRequest.agent_run_id == current_run_id
+        )
         pr = session.exec(statement).first()
         if pr:
             return pr
@@ -84,5 +152,6 @@ def get_pull_request_for_run(session: Session, run_id: uuid.UUID) -> PullRequest
         if not run or not run.parent_run_id:
             break
         current_run_id = run.parent_run_id
+        depth += 1
 
     return None
