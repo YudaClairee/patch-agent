@@ -7,6 +7,6 @@ class DiffFileRead(BaseModel):
     status: Literal["added", "removed", "modified", "renamed"]
     additions: int
     deletions: int
-    patch: str | None    # unified diff text
+    patch: str | None    
 
     model_config = ConfigDict(from_attributes=True)

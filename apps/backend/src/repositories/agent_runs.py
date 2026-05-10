@@ -73,19 +73,20 @@ def get_pull_request_for_run_for_user(
 
 
 def create_agent_run(
-    session: Session, task_id: uuid.UUID, data: TaskCreate
+    session: Session,
+    task_id: uuid.UUID,
+    data: TaskCreate,
+    parent_run: AgentRun | None = None,
 ) -> AgentRun:
     branch_name = None
     model_id = "anthropic/claude-sonnet-4.6"
     follow_up_instruction = data.follow_up_instruction
 
-    if data.parent_run_id:
-        parent_run = session.get(AgentRun, data.parent_run_id)
-        if parent_run:
-            branch_name = parent_run.branch_name
-            model_id = parent_run.model_id
-            if not follow_up_instruction:
-                follow_up_instruction = data.instruction
+    if parent_run:
+        branch_name = parent_run.branch_name
+        model_id = parent_run.model_id
+        if not follow_up_instruction:
+            follow_up_instruction = data.instruction
 
     run = AgentRun(
         task_id=task_id,

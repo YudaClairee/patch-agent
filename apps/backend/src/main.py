@@ -1,6 +1,8 @@
 from fastapi import FastAPI
-from scalar_fastapi import get_scalar_api_reference
 from fastapi.middleware.cors import CORSMiddleware
+from scalar_fastapi import get_scalar_api_reference
+
+from src.routes.tasks import router as tasks_router
 
 app = FastAPI(
     title="P.A.T.C.H.",
@@ -11,11 +13,13 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(tasks_router)
 
 
 @app.get("/")

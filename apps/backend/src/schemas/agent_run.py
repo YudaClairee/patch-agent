@@ -24,7 +24,7 @@ class AgentRunRead(BaseModel):
     queued_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
-    # nested — include when loading single run detail
+    
     tool_calls: list[ToolCallRead] = []
     pull_request: PullRequestRead | None = None
 
