@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     langfuse_host: str = ""
 
     fernet_key: str = ""  # ini buat encrypt github token
+    jwt_secret: str = ""  # ini buat sign jwt
+
+    chroma_host: str = "chroma" # service name di docker-compose, "localhost" untuk lokal
+    chroma_port: int = 8000  # port di docker network, 8000 untuk lokal
 
 
 settings = Settings()
