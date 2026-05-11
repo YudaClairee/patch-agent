@@ -7,11 +7,23 @@ from src.models.agent_run import AgentRun
 from src.models.agent_run_event import AgentRunEvent
 from src.models.enums import RunStatus
 from src.models.pull_request import PullRequest
+from src.models.repository import Repository
 from src.models.task import Task
 from src.schemas.task import TaskCreate
 
 
 def get_agent_run_for_user(
+    session: Session, run_id: uuid.UUID, user_id: uuid.UUID
+) -> AgentRun | None:
+    statement = (
+        select(AgentRun)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(AgentRun.id == run_id, Task.user_id == user_id)
+    )
+    return session.exec(statement).first()
+
+
+def get_agent_run_detail_for_user(
     session: Session, run_id: uuid.UUID, user_id: uuid.UUID
 ) -> AgentRun | None:
     statement = (
@@ -26,32 +38,20 @@ def get_agent_run_for_user(
     return session.exec(statement).first()
 
 
-def get_agent_run_detail_for_user(
-    session: Session, run_id: uuid.UUID, user_id: uuid.UUID
-) -> AgentRun | None:
-    return get_agent_run_for_user(session, run_id, user_id)
-
-
 def list_events_for_user(
     session: Session,
     run_id: uuid.UUID,
     user_id: uuid.UUID,
     limit: int = 50,
-) -> list[AgentRunEvent] | None:
-    ownership_statement = (
-        select(AgentRun.id)
-        .join(Task, AgentRun.task_id == Task.id)
-        .where(AgentRun.id == run_id, Task.user_id == user_id)
-    )
-    if not session.exec(ownership_statement).first():
-        return None
-
+) -> list[AgentRunEvent]:
     if limit > 100:
         limit = 100
 
     statement = (
         select(AgentRunEvent)
-        .where(AgentRunEvent.agent_run_id == run_id)
+        .join(AgentRun, AgentRunEvent.agent_run_id == AgentRun.id)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(AgentRunEvent.agent_run_id == run_id, Task.user_id == user_id)
         .order_by(AgentRunEvent.sequence.asc())
         .limit(limit)
     )
@@ -70,6 +70,15 @@ def get_pull_request_for_run_for_user(
         return None
 
     return get_pull_request_for_run(session, run_id)
+
+def get_repository_for_pull_request_for_user(
+    session: Session, pr: PullRequest, user_id: uuid.UUID
+) -> Repository | None:
+    statement = (
+        select(Repository)
+        .where(Repository.id == pr.repository_id, Repository.user_id == user_id)
+    )
+    return session.exec(statement).first()
 
 
 def create_agent_run(

@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Toggle this to True ONLY during local development when you want the routes
-# to respond without a real auth token.  MUST remain False in production.
+# to respond without a real auth token. MUST remain False in production.
 # ---------------------------------------------------------------------------
-_STUB_ENABLED: bool = True
+_STUB_ENABLED: bool = False
 
 _STUB_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 

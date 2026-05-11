@@ -1,5 +1,9 @@
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
 
 
 class FeedbackCreate(BaseModel):
-    instruction: str = Field(..., min_length=1, max_length=20000, strip_whitespace=True)
+    instruction: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)
+    ]
