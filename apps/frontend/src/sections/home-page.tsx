@@ -20,9 +20,25 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { recentRuns, repoRows, type SetActiveProps, type WorkspaceSummary } from "../wireframe-data";
+import type { DashboardRead } from "../api-contract";
+import {
+  agentRunRows,
+  diffFileRows,
+  formatDashboardUsage,
+  repositoryLabel,
+  type SetActiveProps,
+  useRepositories,
+  useTasks,
+} from "../wireframe-data";
 
-export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { workspaceSummary: WorkspaceSummary }) {
+export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashboardRead: DashboardRead }) {
+  const { data: repositories } = useRepositories();
+  const { data: tasks } = useTasks();
+  const primaryRepository = repositories[0];
+  const primaryTask = tasks[0];
+  const primaryRun = agentRunRows[0];
+  const primaryRepositoryLabel = primaryRepository ? repositoryLabel(primaryRepository) : "Repository";
+
   return (
     <div className={cn("flex h-screen overflow-hidden", patchClasses.appSurface)}>
       <aside className="hidden w-[304px] shrink-0 flex-col border-r border-[var(--patch-border)] bg-[var(--patch-bg)] p-5 lg:flex">
@@ -48,35 +64,39 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
         </button>
 
         <HomeSidebarSection title="Repositories">
-          {repoRows.map((repo) => (
+          {repositories.map((repository) => (
             <button
-              key={repo.name}
+              key={repository.id}
               type="button"
               onClick={() => setActive("repo")}
               className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2 text-left text-sm text-[var(--patch-ink)] hover:bg-[var(--patch-surface)]"
             >
               <FolderGit size={16} className="text-[var(--patch-muted)]" />
-              <span className="min-w-0 flex-1 truncate">{repo.name}</span>
-              <span className="text-xs text-[var(--patch-muted)]">{repo.branch}</span>
+              <span className="min-w-0 flex-1 truncate">{repository.github_repo}</span>
+              <span className="text-xs text-[var(--patch-muted)]">{repository.default_branch}</span>
             </button>
           ))}
         </HomeSidebarSection>
 
         <HomeSidebarSection title="Recent agent runs">
-          {recentRuns.map((run) => (
-            <button
-              key={run.task}
-              type="button"
-              onClick={() => setActive(run.status === "succeeded" ? "diff" : "run")}
-              className="flex w-full items-start gap-3 rounded-[10px] px-2 py-2 text-left hover:bg-[var(--patch-surface)]"
-            >
-              <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[var(--patch-muted)]" />
-              <span className="min-w-0">
-                <span className="block truncate text-sm text-[var(--patch-ink)]">{run.task}</span>
-                <span className="block truncate text-xs text-[var(--patch-muted)]">{run.status}</span>
-              </span>
-            </button>
-          ))}
+          {agentRunRows.map((run) => {
+            const task = tasks.find((item) => item.id === run.task_id);
+
+            return (
+              <button
+                key={run.id}
+                type="button"
+                onClick={() => setActive(run.status === "succeeded" ? "diff" : "run")}
+                className="flex w-full items-start gap-3 rounded-[10px] px-2 py-2 text-left hover:bg-[var(--patch-surface)]"
+              >
+                <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[var(--patch-muted)]" />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm text-[var(--patch-ink)]">{task?.title ?? run.id}</span>
+                  <span className="block truncate text-xs text-[var(--patch-muted)]">{run.status}</span>
+                </span>
+              </button>
+            );
+          })}
         </HomeSidebarSection>
 
         <div className="mt-auto">
@@ -92,7 +112,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-[var(--patch-border)]">
             <div className="h-full w-[42%] rounded-full bg-[var(--patch-ink)]" />
           </div>
-          <div className="mt-3 text-sm text-[var(--patch-muted)]">{workspaceSummary.usageLabel}</div>
+          <div className="mt-3 text-sm text-[var(--patch-muted)]">{formatDashboardUsage(dashboardRead)}</div>
         </div>
       </aside>
 
@@ -103,7 +123,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
               type="button"
               className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--patch-bg)] px-4 font-mono text-sm font-semibold text-[var(--patch-ink)]"
             >
-              fastapi-auth-app
+              {primaryRepository?.github_repo ?? "repository"}
               <ChevronRight size={16} className="rotate-90 text-[var(--patch-muted)]" />
             </button>
             <button
@@ -111,7 +131,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
               className="hidden min-h-10 items-center gap-2 rounded-full bg-[var(--patch-bg)] px-4 text-sm font-medium text-[var(--patch-ink)] md:flex"
             >
               <GitBranch size={16} />
-              main
+              {primaryRepository?.default_branch ?? "main"}
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -146,8 +166,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
             <div className="min-h-0 flex-1 overflow-auto px-5 pb-44 pt-6">
               <div className="mx-auto flex w-full max-w-[880px] flex-col gap-5">
                 <ChatBubble speaker="user">
-                  Tambahkan unit test untuk endpoint login. Pastikan test dapat dijalankan dengan pytest dan jangan ubah
-                  logic utama jika tidak perlu.
+                  {primaryTask?.instruction ?? "Describe a coding task for this repository."}
                 </ChatBubble>
                 <ChatBubble speaker="agent">
                   Saya akan membaca struktur repo, mencari endpoint auth/login, membuat execution plan, menambahkan
@@ -162,10 +181,10 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
                         Current agent run
                       </div>
                       <p className="mt-2 text-sm leading-5 text-[var(--patch-muted)]">
-                        run_123 / patch/task-102 / Langfuse trace lf_9a12
+                        {primaryRun.id} / {primaryRun.branch_name ?? "branch pending"} / {primaryRun.model_id}
                       </p>
                     </div>
-                    <Badge tone="inverse">review_required</Badge>
+                    <Badge tone="inverse">{primaryRun.status}</Badge>
                   </div>
                   <div className="mt-5 grid gap-3 md:grid-cols-4">
                     <HomeRunStep title="Workspace" value="ready" active />
@@ -229,7 +248,7 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
                   className="flex h-10 items-center gap-2 rounded-full border border-[var(--patch-border)] bg-[var(--patch-bg)] px-4 font-mono text-sm font-semibold text-[var(--patch-ink)] transition hover:bg-[var(--patch-border)]"
                 >
                   <GitBranch size={15} />
-                  main
+                  {primaryTask?.target_branch ?? primaryRepository?.default_branch ?? "main"}
                 </button>
                 <button
                   type="button"
@@ -265,10 +284,13 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
               <Card className="p-5">
                 <SectionHeading title="Repository Context" action={<Badge>indexed</Badge>} />
                 <div className="mt-4 space-y-3">
-                  <StatusLine label="Repo" value="fastapi-auth-app" />
-                  <StatusLine label="Branch" value="main" />
-                  <StatusLine label="Workspace" value="/workspaces/run_123/repo" />
-                  <StatusLine label="Credential" value="github_token_prod_01" />
+                  <StatusLine label="Repo" value={primaryRepositoryLabel} />
+                  <StatusLine
+                    label="Branch"
+                    value={primaryTask?.target_branch ?? primaryRepository?.default_branch ?? "main"}
+                  />
+                  <StatusLine label="Run endpoint" value={`/agent_runs/${primaryRun.id}`} />
+                  <StatusLine label="Repository ID" value={primaryRepository?.id ?? "not selected"} />
                 </div>
               </Card>
 
@@ -298,8 +320,14 @@ export function HomePage({ setActive, workspaceSummary }: SetActiveProps & { wor
                   the workspace.
                 </p>
                 <div className="mt-4 space-y-3 text-sm">
-                  <FileRow path="tests/test_auth.py" additions="+82" deletions="-0" />
-                  <FileRow path="app/auth/routes.py" additions="+4" deletions="-1" />
+                  {diffFileRows.map((file) => (
+                    <FileRow
+                      key={file.file_path}
+                      path={file.file_path}
+                      additions={`+${file.additions}`}
+                      deletions={`-${file.deletions}`}
+                    />
+                  ))}
                 </div>
                 <div className="mt-5 grid gap-3">
                   <Button onClick={() => setActive("diff")}>

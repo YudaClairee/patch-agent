@@ -1,4 +1,5 @@
 import { createRootRoute, createRoute, Outlet } from "@tanstack/react-router";
+import { LoginPage } from "../sections/login-page";
 import type { ScreenId } from "../wireframe-data";
 import ScreenView from "./screen-view";
 
@@ -22,9 +23,15 @@ const taskRoute = makeScreenRoute("task", "task");
 const runRoute = makeScreenRoute("run", "run");
 const diffRoute = makeScreenRoute("diff", "diff");
 const prRoute = makeScreenRoute("pr", "pr");
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "login",
+  component: LoginPage,
+});
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
+  loginRoute,
   dashboardRoute,
   repoRoute,
   taskRoute,

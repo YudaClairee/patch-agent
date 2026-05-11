@@ -26,9 +26,14 @@ yarn-error.log*
 pnpm-debug.log*
 
 # local notes and generated task files
-DESIGN.md
-ux-researcher.md
-todos.json
+markdown/
+# DESIGN.md
+# ux-researcher.md
+# todos.json
+# api_contract.md
+# PRD Project P A T C H.md
+# api_contract_frontend_audit.md
+
 
 # macOS
 .DS_Store

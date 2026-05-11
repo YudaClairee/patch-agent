@@ -1,16 +1,22 @@
 import { Badge, Button, Card, SectionHeading } from "@patch/ui";
-import { Activity, FileCode2, FolderGit, GitPullRequest, type LucideProps, Plus } from "lucide-react";
+import { Activity, CalendarDays, FileCode2, FolderGit, type LucideProps, Plus } from "lucide-react";
 import React, { type ReactElement } from "react";
-import { recentRuns, repoRows, type SetActiveProps, type WorkspaceSummary } from "../wireframe-data";
+import type { DashboardRead } from "../api-contract";
+import { findRepository, repositoryLabel, type SetActiveProps, useRepositories, useTasks } from "../wireframe-data";
 
-export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { workspaceSummary: WorkspaceSummary }) {
+export function Dashboard({ setActive, dashboardRead }: SetActiveProps & { dashboardRead: DashboardRead }) {
+  const { data: repositories } = useRepositories();
+  const { data: tasks } = useTasks();
+  const primaryRepository = repositories[0];
+  const primaryTask = tasks[0];
+
   return (
     <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-4">
-        <Metric icon={<FolderGit />} label="Repositories" value={String(workspaceSummary.repositoryCount)} />
-        <Metric icon={<Activity />} label="Active Runs" value={String(workspaceSummary.activeRunCount)} />
-        <Metric icon={<FileCode2 />} label="Succeeded" value={String(workspaceSummary.succeededCount)} />
-        <Metric icon={<GitPullRequest />} label="PR Created" value={String(workspaceSummary.pullRequestCount)} />
+        <Metric icon={<FolderGit />} label="Repositories" value={String(dashboardRead.repository_count)} />
+        <Metric icon={<Activity />} label="Active Runs" value={String(dashboardRead.active_run_count)} />
+        <Metric icon={<FileCode2 />} label="Succeeded" value={String(dashboardRead.succeeded_run_count)} />
+        <Metric icon={<CalendarDays />} label="Runs Today" value={String(dashboardRead.today_run_count)} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
@@ -25,9 +31,9 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
             }
           />
           <div className="mt-4 divide-y divide-[var(--patch-border)]">
-            {repoRows.map((repo) => (
+            {repositories.map((repository) => (
               <button
-                key={repo.name}
+                key={repository.id}
                 type="button"
                 onClick={() => setActive("repo")}
                 className="flex w-full items-center justify-between gap-4 py-4 text-left"
@@ -38,14 +44,14 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
                   </div>
                   <div className="min-w-0">
                     <div className="truncate text-base font-semibold tracking-[-0.006em] text-[var(--patch-ink)]">
-                      {repo.name}
+                      {repositoryLabel(repository)}
                     </div>
                     <div className="text-sm text-[var(--patch-muted)]">
-                      Branch: {repo.branch} / {repo.lang}
+                      Branch: {repository.default_branch} / {repository.language ?? "Unknown"}
                     </div>
                   </div>
                 </div>
-                <Badge tone={repo.status === "Indexed" ? "inverse" : "default"}>{repo.status}</Badge>
+                <Badge tone="inverse">connected</Badge>
               </button>
             ))}
           </div>
@@ -53,7 +59,7 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
 
         <Card className="p-5">
           <SectionHeading
-            title="Recent Runs"
+            title="Recent Tasks"
             action={
               <Button variant="chip" onClick={() => setActive("run")}>
                 View all
@@ -61,22 +67,28 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
             }
           />
           <div className="mt-4 space-y-3">
-            {recentRuns.map((run) => (
-              <button
-                key={run.task}
-                type="button"
-                onClick={() => setActive(run.status === "succeeded" ? "diff" : "run")}
-                className="flex w-full items-center justify-between gap-4 rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-left transition hover:bg-[var(--patch-surface)]"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold tracking-[-0.003em] text-[var(--patch-ink)]">
-                    {run.task}
+            {tasks.map((task) => {
+              const repository = findRepository(task.repository_id, repositories);
+
+              return (
+                <button
+                  key={task.id}
+                  type="button"
+                  onClick={() => setActive("run")}
+                  className="flex w-full items-center justify-between gap-4 rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-left transition hover:bg-[var(--patch-surface)]"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold tracking-[-0.003em] text-[var(--patch-ink)]">
+                      {task.title}
+                    </div>
+                    <div className="mt-1 text-sm text-[var(--patch-muted)]">
+                      {repository ? repositoryLabel(repository) : task.repository_id}
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm text-[var(--patch-muted)]">{run.repo}</div>
-                </div>
-                <Badge tone={run.status === "review_required" ? "inverse" : "default"}>{run.status}</Badge>
-              </button>
-            ))}
+                  <Badge>{task.target_branch}</Badge>
+                </button>
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -84,9 +96,13 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
       <Card className="p-5">
         <SectionHeading title="Current Route" action={<Badge tone="inverse">verifying</Badge>} />
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          <RouteStep label="Repo indexed" value="fastapi-auth-app" active />
-          <RouteStep label="Agent verifying" value="pytest + ruff" active />
-          <RouteStep label="Review gate" value="diff approval required" />
+          <RouteStep
+            label="Repository"
+            value={primaryRepository ? repositoryLabel(primaryRepository) : "not selected"}
+            active
+          />
+          <RouteStep label="Task" value={primaryTask?.target_branch ?? "target_branch"} active />
+          <RouteStep label="Review" value="/agent_runs/{id}/diff" />
         </div>
       </Card>
     </div>

@@ -1,7 +1,12 @@
 import { Badge, Card, SectionHeading, StatusLine } from "@patch/ui";
 import { ExternalLink, GitPullRequest } from "lucide-react";
+import { apiEndpoints } from "../api-contract";
+import { useAgentRun } from "../wireframe-data";
 
 export function PRResult() {
+  const { data: agentRun } = useAgentRun();
+  const pullRequest = agentRun.pull_request;
+
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
       <Card className="p-6">
@@ -11,30 +16,31 @@ export function PRResult() {
               <GitPullRequest size={26} />
             </div>
             <h2 className="text-[32px] font-bold leading-tight tracking-[-0.6px] text-[var(--patch-ink)]">
-              PR berhasil dibuat
+              PullRequestRead
             </h2>
             <p className="mt-3 max-w-xl text-base leading-6 tracking-[-0.006em] text-[var(--patch-text)]">
-              Branch <strong>patch/task-102</strong> sudah dibuat dan pull request siap ditinjau di GitHub.
+              Branch <strong>{pullRequest?.head_branch ?? agentRun.branch_name ?? "branch pending"}</strong> siap dibuka
+              lewat endpoint {apiEndpoints.agentRunPullRequest(agentRun.id)}.
             </p>
           </div>
-          <Badge tone="inverse">ready</Badge>
+          <Badge tone="inverse">{pullRequest?.state ?? agentRun.status}</Badge>
         </div>
 
         <div className="mt-6 rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4">
-          <div className="text-sm font-semibold text-[var(--patch-ink)]">PR URL</div>
+          <div className="text-sm font-semibold text-[var(--patch-ink)]">url</div>
           <div className="mt-2 flex items-center justify-between gap-3 rounded-full border border-[var(--patch-border)] bg-[var(--patch-surface)] px-4 py-3 text-sm text-[var(--patch-ink)]">
-            <span className="truncate">github.com/user/fastapi-auth-app/pull/42</span>
+            <span className="truncate">{pullRequest?.url ?? "Pull request belum tersedia"}</span>
             <ExternalLink size={16} />
           </div>
         </div>
       </Card>
 
       <Card className="p-5">
-        <SectionHeading title="Verification" />
+        <SectionHeading title="Pull Request" />
         <div className="mt-5 space-y-3">
-          <StatusLine label="pytest" value="passed" />
-          <StatusLine label="ruff" value="passed" />
-          <StatusLine label="Langfuse trace" value="saved" />
+          <StatusLine label="github_pr_number" value={String(pullRequest?.github_pr_number ?? "-")} />
+          <StatusLine label="base_branch" value={pullRequest?.base_branch ?? "-"} />
+          <StatusLine label="head_branch" value={pullRequest?.head_branch ?? agentRun.branch_name ?? "-"} />
         </div>
       </Card>
     </div>

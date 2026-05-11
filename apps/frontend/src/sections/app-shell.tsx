@@ -2,7 +2,8 @@ import { Badge, Button, cn, patchClasses } from "@patch/ui";
 import { motion } from "framer-motion";
 import { Activity, ChevronRight, FolderGit, Plus, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
-import { type ScreenId, type SetActive, screenMeta, screens, type WorkspaceSummary } from "../wireframe-data";
+import type { DashboardRead } from "../api-contract";
+import { formatDashboardUsage, type ScreenId, type SetActive, screenMeta, screens } from "../wireframe-data";
 
 type ActiveScreenProps = {
   active: ScreenId;
@@ -12,9 +13,9 @@ type ActiveScreenProps = {
 export function AppShell({
   active,
   setActive,
-  workspaceSummary,
+  dashboardRead,
   children,
-}: ActiveScreenProps & { workspaceSummary: WorkspaceSummary; children: ReactNode }) {
+}: ActiveScreenProps & { dashboardRead: DashboardRead; children: ReactNode }) {
   const meta = screenMeta[active];
 
   return (
@@ -56,11 +57,11 @@ export function AppShell({
                 <Activity size={16} />
                 Agent pool
               </div>
-              <Badge>{workspaceSummary.activeRunCount} active</Badge>
+              <Badge>{dashboardRead.active_run_count} active</Badge>
             </div>
             <div className="mt-4 space-y-3">
-              <MiniMeter label="CPU" value="42%" width="w-[42%]" />
-              <MiniMeter label="Queue" value="3 runs" width="w-[68%]" />
+              <MiniMeter label="Active" value={`${dashboardRead.active_run_count} runs`} width="w-[42%]" />
+              <MiniMeter label="Today" value={`${dashboardRead.today_run_count} runs`} width="w-[68%]" />
             </div>
           </div>
 
@@ -137,7 +138,7 @@ export function AppShell({
 
           <footer className="flex h-9 shrink-0 items-center justify-between border-t border-[var(--patch-border)] bg-[var(--patch-surface)] px-4 text-xs text-[var(--patch-muted)]">
             <span className="truncate">workspace / fastapi-auth-app / main</span>
-            <span className="hidden md:inline">{workspaceSummary.verificationStatus}</span>
+            <span className="hidden md:inline">{formatDashboardUsage(dashboardRead)}</span>
           </footer>
         </main>
       </div>
