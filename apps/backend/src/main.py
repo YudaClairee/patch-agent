@@ -6,6 +6,7 @@ from src.routes.tasks import tasks_router
 from src.routes.agent_runs import agent_runs_router
 from src.routes.feedback import feedback_router
 from src.routes.dashboard import dashboard_router
+from src.routes.ws import ws_router
 
 app = FastAPI(
     title="P.A.T.C.H.",
@@ -26,6 +27,7 @@ app.include_router(tasks_router)
 app.include_router(agent_runs_router)
 app.include_router(feedback_router)
 app.include_router(dashboard_router)
+app.include_router(ws_router)
 
 
 @app.get("/")

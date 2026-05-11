@@ -92,7 +92,7 @@ async def current_user_ws(websocket: WebSocket):
 
     # TODO (Stream 1): extract token from query param / cookie,
     # validate it, look up the User, and return it.
-    await websocket.close(code=1008)  # Policy Violation
+    await websocket.close(code=4001)  # Auth Failed
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required (Stream 1 not yet integrated).",
