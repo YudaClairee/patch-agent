@@ -47,6 +47,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Celery worker — dispatches agent containers via the host Docker socket.
+  # Docker socket mount is used (simpler than DinD for MVP).
+  # The worker spawns patch/agent containers; it does NOT run the agent itself.
+  celery_worker:
+    build: ./apps/backend
+    command: uv run celery -A src.services.agent_runner worker --loglevel=info --concurrency=2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      REDIS_URL: redis://valkey:6379/0
+    env_file:
+      - ./apps/backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    restart: unless-stopped
+
   frontend:
     build: ./apps/frontend
     ports:
