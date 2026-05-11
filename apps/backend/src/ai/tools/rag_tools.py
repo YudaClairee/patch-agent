@@ -1,28 +1,45 @@
+import logging
+import uuid
+from pathlib import Path
+
 import chromadb
 from chromadb import Collection
-from pathlib import Path
-from openai import OpenAI
 from chonkie import SemanticChunker
+from openai import OpenAI
+
 from src.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 EMBEDDING_MODEL = "text-embedding-3-small"
+
 IGNORED_PATHS: list[str] = [
     ".git", "node_modules", ".venv", "dist", "build",
     ".env", ".env.local", ".pem", ".key", ".png", ".jpg", ".zip",
-    "__pycache__", ".pyc", ".DS_Store", ".pytest_cache"
+    "__pycache__", ".pyc", ".DS_Store", ".pytest_cache",
 ]
-_CHROMA_PATH = str(Path(".data/chromadb").resolve())
-_chroma_client = chromadb.PersistentClient(path=_CHROMA_PATH)
 
-_chunker = SemanticChunker(embedding_model="minishlab/potion-base-32M", chunk_size=256, threshold=0.5)
+_chroma_client = chromadb.HttpClient(
+    host=settings.chroma_host,
+    port=settings.chroma_port,
+)
+
+_openai_client = OpenAI(
+    api_key=settings.openrouter_api_key,
+    base_url=settings.openrouter_base_url,
+)
+
+_chunker = SemanticChunker(
+    embedding_model="minishlab/potion-base-32M",
+    chunk_size=256,
+    threshold=0.5,
+)
+
 
 def _get_embedding(text: str) -> list[float]:
-    client = OpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
-    )
-    response = client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+    response = _openai_client.embeddings.create(model=EMBEDDING_MODEL, input=text)
     return response.data[0].embedding
+
 
 def _should_ignore(file_path: str) -> bool:
     for pattern in IGNORED_PATHS:
@@ -30,9 +47,14 @@ def _should_ignore(file_path: str) -> bool:
             return True
     return False
 
+
+def _get_collection_name(repository_id: str, branch: str) -> str:
+    return f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
+
+
 def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict[str, str]:
     """Index all source code files in the workspace into ChromaDB."""
-    collection_name = f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
+    collection_name = _get_collection_name(repository_id, branch)
 
     try:
         _chroma_client.delete_collection(collection_name)
@@ -41,9 +63,12 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
 
     collection: Collection = _chroma_client.create_collection(collection_name)
     base = Path(workspace_path)
-    
+
     indexed = 0
-    documents, embeddings, metadatas, ids = [], [], [], []
+    documents: list[str] = []
+    embeddings: list[list[float]] = []
+    metadatas: list[dict] = []
+    ids: list[str] = []
 
     for file_path in base.rglob("*"):
         if not file_path.is_file():
@@ -52,19 +77,19 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
         if _should_ignore(rel_path):
             continue
 
-        print(f"Indexing: {rel_path}...")
-            
+        logger.debug("Indexing: %s", rel_path)
+
         try:
             content = file_path.read_text(encoding="utf-8", errors="ignore")
             if not content.strip():
                 continue
-                
+
             chunks = _chunker.chunk(text=content)
-            
+
             for i, chunk in enumerate(chunks):
                 if not chunk.text.strip():
                     continue
-                
+
                 chunk_id = f"{repository_id}_{rel_path}_{i}"
                 documents.append(chunk.text)
                 embeddings.append(_get_embedding(chunk.text))
@@ -76,8 +101,9 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
                 })
                 ids.append(chunk_id)
                 indexed += 1
-                
+
         except Exception:
+            logger.warning("Failed to index file: %s", rel_path, exc_info=True)
             continue
 
     if documents:
@@ -88,11 +114,18 @@ def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict
             ids=ids,
         )
 
+    logger.info("Indexed %d chunks for repo %s branch %s", indexed, repository_id, branch)
     return {"status": "success", "indexed_chunks": str(indexed)}
 
-def search_code(query: str, repository_id: str, branch: str, n_results: int = 5) -> dict[str, list[dict]]:
+
+def search_code(
+    query: str,
+    repository_id: str,
+    branch: str,
+    n_results: int = 5,
+) -> dict[str, list[dict]]:
     """Search for relevant code snippets in the indexed repository."""
-    collection_name = f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
+    collection_name = _get_collection_name(repository_id, branch)
 
     try:
         collection = _chroma_client.get_collection(collection_name)
@@ -122,6 +155,7 @@ def search_code(query: str, repository_id: str, branch: str, n_results: int = 5)
                 })
 
     return {"results": output}
+
 
 def get_code_context(workspace_path: str, file_path: str) -> dict[str, str]:
     """Get the full content of a specific code file for better context."""
