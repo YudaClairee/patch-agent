@@ -40,7 +40,6 @@ def _get_stub_user():
     """Return (and cache) the hard-coded stub User instance."""
     global _stub_user_cache  # noqa: PLW0603
     if _stub_user_cache is None:
-        # Import here, not at module level, so mappers are all configured first.
         from src.models.user import User  # noqa: PLC0415
 
         _stub_user_cache = User(
@@ -92,7 +91,6 @@ async def current_user_ws(websocket: WebSocket):
 
     # TODO (Stream 1): extract token from query param / cookie,
     # validate it, look up the User, and return it.
-    await websocket.close(code=4001)  # Auth Failed
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Authentication required (Stream 1 not yet integrated).",

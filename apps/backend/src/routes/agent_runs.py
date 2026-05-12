@@ -7,7 +7,6 @@ from sqlmodel import Session
 
 from src.core.auth import current_user
 from src.core.database import get_session
-from src.models.repository import Repository
 from src.models.user import User
 from src.repositories import agent_runs as agent_runs_repo
 from src.schemas.agent_run import AgentRunRead
@@ -73,7 +72,6 @@ def get_agent_run_diff(
     if not repository:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    # STUB: decrypt_token expects a credential, passing None for now
     try:
         pat = decrypt_token(None)
     except NotImplementedError as e:

@@ -1,15 +1,16 @@
 import uuid
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 
 class TaskCreate(BaseModel):
     repository_id: uuid.UUID
-    instruction: str = Field(..., min_length=1, max_length=20000, strip_whitespace=True)
-    target_branch: str = Field(..., min_length=1, max_length=255, strip_whitespace=True)
+    instruction: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)]
+    target_branch: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
     parent_run_id: uuid.UUID | None = None
-    follow_up_instruction: str | None = Field(None, max_length=20000, strip_whitespace=True)
+    follow_up_instruction: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20000)] | None = None
 
 
 class TaskRead(BaseModel):
