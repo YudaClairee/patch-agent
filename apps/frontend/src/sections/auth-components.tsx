@@ -132,7 +132,7 @@ export const AuthWorkspacePreview = memo(function AuthWorkspacePreview({
   loadingStateLabel = "verifying",
   successStateLabel = "restored",
   latestRunLabel = "Latest run",
-  latestRunTitle = "pytest gate before PR",
+  latestRunTitle = "live run after task",
   signals = defaultWorkspaceSignals,
 }: AuthWorkspacePreviewProps) {
   const previewState =

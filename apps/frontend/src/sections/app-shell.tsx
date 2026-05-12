@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Activity, ChevronRight, FolderGit, Loader2, LogOut, Plus, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { ApiClientError, type DashboardRead, patchApi } from "../api-contract";
+import { ApiClientError, type DashboardRead, patchApi } from "../lib/api";
 import { formatDashboardUsage, type ScreenId, type SetActive, screenMeta, screens } from "../wireframe-data";
 
 type ActiveScreenProps = {
@@ -106,7 +106,7 @@ export function AppShell({
               Review gate
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--patch-on-dark-muted)]">
-              Pull request dibuat setelah diff disetujui.
+              Diff review opens after a pull request exists.
             </p>
             <LogoutButton isLoading={isLoggingOut} onClick={handleLogout} className="mt-4 w-full" />
           </div>
@@ -155,6 +155,10 @@ export function AppShell({
                   <FolderGit size={15} />
                   Repositories
                 </Button>
+                <Button variant="secondary" onClick={() => setActive("settings")}>
+                  <ShieldCheck size={15} />
+                  GitHub PAT
+                </Button>
                 <Button onClick={() => setActive("task")}>
                   <Plus size={15} />
                   New Task
@@ -187,7 +191,7 @@ export function AppShell({
           </motion.div>
 
           <footer className="flex h-9 shrink-0 items-center justify-between border-t border-[var(--patch-border)] bg-[var(--patch-surface)] px-4 text-xs text-[var(--patch-muted)]">
-            <span className="truncate">workspace / fastapi-auth-app / main</span>
+            <span className="truncate">workspace / live Stream API</span>
             <span className="hidden md:inline">{formatDashboardUsage(dashboardRead)}</span>
           </footer>
         </main>

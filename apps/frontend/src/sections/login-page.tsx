@@ -3,7 +3,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
 import { Eye, EyeOff, GitBranch, KeyRound, Mail, ShieldCheck, UserPlus } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { patchApi } from "../api-contract";
+import { patchApi } from "../lib/api";
 import { type AuthFlowState, AuthSubmitButton, AuthWorkspacePreview, FormField } from "./auth-components";
 
 type LoginState = AuthFlowState;
@@ -12,7 +12,7 @@ const signInOptions = ["GitHub", "GitLab", "SSO"] as const;
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("hendra@patch.dev");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberWorkspace, setRememberWorkspace] = useState(true);

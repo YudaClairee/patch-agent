@@ -16,7 +16,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { type FormEvent, memo, useState } from "react";
-import { patchApi } from "../api-contract";
+import { patchApi } from "../lib/api";
 import { type AuthFlowState, AuthSubmitButton, FormField } from "./auth-components";
 
 type SignupField = "name" | "email" | "password" | "confirmPassword";

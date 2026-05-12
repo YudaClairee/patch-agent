@@ -1,19 +1,21 @@
 import { Badge, Button, Card, Field, SectionHeading, Textarea } from "@patch/ui";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { GitBranch, Play } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
-import { apiEndpoints, patchApi, type TaskCreate } from "../api-contract";
+import { apiEndpoints, patchApi, type TaskCreate } from "../lib/api";
 import { repositoryLabel, type SetActiveProps, useRepositories } from "../wireframe-data";
 
 type SubmitState = "idle" | "submitting" | "success" | "error";
 
 export function NewTask({ setActive }: SetActiveProps) {
-  const { data: repositories } = useRepositories();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: repositories = [], isLoading, isError } = useRepositories();
   const firstRepository = repositories[0];
   const [repository_id, setRepositoryId] = useState(firstRepository?.id ?? "");
   const [target_branch, setTargetBranch] = useState(firstRepository?.default_branch ?? "main");
-  const [instruction, setInstruction] = useState(
-    "Tambahkan unit test untuk endpoint login. Pastikan test dapat dijalankan dengan pytest. Jangan ubah logic utama jika tidak perlu.",
-  );
+  const [instruction, setInstruction] = useState("");
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
 
   useEffect(() => {
@@ -40,9 +42,12 @@ export function NewTask({ setActive }: SetActiveProps) {
     setSubmitState("submitting");
 
     try {
-      await patchApi.createTask(taskCreate);
+      const agentRun = await patchApi.createTask(taskCreate);
       setSubmitState("success");
-      setActive("run");
+      void queryClient.invalidateQueries({ queryKey: ["patch", apiEndpoints.tasks] });
+      void queryClient.invalidateQueries({ queryKey: ["patch", apiEndpoints.agentRuns] });
+      void queryClient.invalidateQueries({ queryKey: ["patch", apiEndpoints.dashboard] });
+      void navigate({ to: "/run/$id", params: { id: agentRun.id } });
     } catch {
       setSubmitState("error");
     }
@@ -65,6 +70,7 @@ export function NewTask({ setActive }: SetActiveProps) {
               }}
               className="flex min-h-11 w-full items-center rounded-[16px] border border-[var(--patch-border)] bg-[var(--patch-bg)] px-3 text-sm text-[var(--patch-ink)] outline-none transition focus:border-[var(--patch-ink)]"
               required
+              disabled={isLoading || repositories.length === 0}
             >
               {repositories.map((repository) => (
                 <option key={repository.id} value={repository.id}>
@@ -72,6 +78,18 @@ export function NewTask({ setActive }: SetActiveProps) {
                 </option>
               ))}
             </select>
+            {repositories.length === 0 && (
+              <p className="mt-2 text-xs leading-5 text-[var(--patch-muted)]">
+                {isLoading
+                  ? "Loading connected repositories..."
+                  : "No repository is connected yet. Add one before creating a run."}
+              </p>
+            )}
+            {isError && (
+              <p className="mt-2 text-xs leading-5 text-[var(--patch-ink)]">
+                Unable to load repositories from Stream 2.
+              </p>
+            )}
           </label>
           <Field
             label="target_branch"
@@ -110,7 +128,7 @@ export function NewTask({ setActive }: SetActiveProps) {
             <Button variant="secondary" onClick={() => setActive("dashboard")}>
               Save Draft
             </Button>
-            <Button type="submit" disabled={submitState === "submitting"}>
+            <Button type="submit" disabled={submitState === "submitting" || repositories.length === 0}>
               <Play size={15} />
               {submitState === "submitting" ? "Creating..." : "Create Agent Run"}
             </Button>

@@ -1,4 +1,5 @@
-import { Badge, Button, Card, cn, FileRow, patchClasses, SectionHeading, StatusLine, Textarea } from "@patch/ui";
+import { Badge, Button, Card, cn, patchClasses, SectionHeading, StatusLine, Textarea } from "@patch/ui";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Activity,
   ArrowRight,
@@ -19,24 +20,26 @@ import {
   Terminal,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import type { DashboardRead } from "../api-contract";
+import type { DashboardRead } from "../lib/api";
 import {
-  agentRunRows,
-  diffFileRows,
   formatDashboardUsage,
   repositoryLabel,
   type SetActiveProps,
+  useAgentRuns,
   useRepositories,
   useTasks,
 } from "../wireframe-data";
 
 export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashboardRead: DashboardRead }) {
-  const { data: repositories } = useRepositories();
-  const { data: tasks } = useTasks();
+  const navigate = useNavigate();
+  const { data: repositories = [] } = useRepositories();
+  const { data: tasks = [] } = useTasks();
+  const { data: runs = [] } = useAgentRuns();
   const primaryRepository = repositories[0];
   const primaryTask = tasks[0];
-  const primaryRun = agentRunRows[0];
+  const primaryRun = runs[0];
   const primaryRepositoryLabel = primaryRepository ? repositoryLabel(primaryRepository) : "Repository";
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
 
   return (
     <div className={cn("flex h-screen overflow-hidden", patchClasses.appSurface)}>
@@ -77,25 +80,29 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
           ))}
         </HomeSidebarSection>
 
-        <HomeSidebarSection title="Recent agent runs">
-          {agentRunRows.map((run) => {
-            const task = tasks.find((item) => item.id === run.task_id);
+        <HomeSidebarSection title="Recent runs">
+          {runs.slice(0, 4).map((run) => {
+            const task = taskById.get(run.task_id);
+            const title = task?.title ?? run.pull_request?.title ?? run.id;
 
             return (
               <button
                 key={run.id}
                 type="button"
-                onClick={() => setActive(run.status === "succeeded" ? "diff" : "run")}
+                onClick={() => void navigate({ to: "/run/$id", params: { id: run.id } })}
                 className="flex w-full items-start gap-3 rounded-[10px] px-2 py-2 text-left hover:bg-[var(--patch-surface)]"
               >
                 <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-[var(--patch-muted)]" />
                 <span className="min-w-0">
-                  <span className="block truncate text-sm text-[var(--patch-ink)]">{task?.title ?? run.id}</span>
+                  <span className="block truncate text-sm text-[var(--patch-ink)]">{title}</span>
                   <span className="block truncate text-xs text-[var(--patch-muted)]">{run.status}</span>
                 </span>
               </button>
             );
           })}
+          {runs.length === 0 && (
+            <p className="px-2 py-2 text-sm leading-5 text-[var(--patch-muted)]">No agent runs yet.</p>
+          )}
         </HomeSidebarSection>
 
         <div className="mt-auto">
@@ -105,7 +112,7 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
               <ShieldCheck size={16} />
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--patch-muted)]">
-              PR dibuat setelah diff disetujui. Secret/token tidak ditampilkan ulang.
+              PR diff appears after the agent publishes a pull request. Secret/token values are never displayed again.
             </p>
           </div>
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-[var(--patch-border)]">
@@ -168,8 +175,8 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                   {primaryTask?.instruction ?? "Describe a coding task for this repository."}
                 </ChatBubble>
                 <ChatBubble speaker="agent">
-                  Saya akan membaca struktur repo, mencari endpoint auth/login, membuat execution plan, menambahkan
-                  test, menjalankan pytest dan ruff, lalu menahan hasilnya di review gate sebelum PR.
+                  Saya akan menunggu task baru, membuka run live dari WebSocket, lalu menampilkan PR dan diff saat
+                  backend mengirim status terminal.
                 </ChatBubble>
 
                 <Card className="p-5">
@@ -177,28 +184,37 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                     <div>
                       <div className="flex items-center gap-2 text-sm font-semibold text-[var(--patch-ink)]">
                         <Activity size={16} />
-                        Current agent run
+                        Workspace activity
                       </div>
                       <p className="mt-2 text-sm leading-5 text-[var(--patch-muted)]">
-                        {primaryRun.id} / {primaryRun.branch_name ?? "branch pending"} / {primaryRun.model_id}
+                        {dashboardRead.active_run_count} active runs / {dashboardRead.succeeded_run_count} succeeded
+                        runs / {dashboardRead.today_run_count} today
                       </p>
                     </div>
-                    <Badge tone="inverse">{primaryRun.status}</Badge>
+                    <Badge tone="inverse">{dashboardRead.active_run_count > 0 ? "active" : "ready"}</Badge>
                   </div>
                   <div className="mt-5 grid gap-3 md:grid-cols-4">
-                    <HomeRunStep title="Workspace" value="ready" active />
-                    <HomeRunStep title="Indexing" value="Vector DB" active />
-                    <HomeRunStep title="Verifying" value="pytest + ruff" active />
-                    <HomeRunStep title="Review" value="diff gate" />
+                    <HomeRunStep title="Repositories" value={String(dashboardRead.repository_count)} active />
+                    <HomeRunStep title="Active runs" value={String(dashboardRead.active_run_count)} active />
+                    <HomeRunStep title="Succeeded" value={String(dashboardRead.succeeded_run_count)} active />
+                    <HomeRunStep title="Review" value="run-scoped" />
                   </div>
                 </Card>
 
                 <Card className="p-5">
                   <SectionHeading title="Task Outcomes" action={<Badge>success criteria</Badge>} />
                   <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <OutcomeCheck label="Relevant context found" value="auth router + test fixtures" done />
-                    <OutcomeCheck label="Verification passes" value="pytest and ruff complete" done />
-                    <OutcomeCheck label="Human review remains" value="diff approval required" />
+                    <OutcomeCheck
+                      label="Repository selected"
+                      value={primaryRepositoryLabel}
+                      done={Boolean(primaryRepository)}
+                    />
+                    <OutcomeCheck
+                      label="Branch selected"
+                      value={primaryTask?.target_branch ?? primaryRepository?.default_branch ?? "choose branch"}
+                      done={Boolean(primaryTask || primaryRepository)}
+                    />
+                    <OutcomeCheck label="Human review remains" value="diff route after PR" />
                   </div>
                 </Card>
 
@@ -206,20 +222,21 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                   <Card className="p-5">
                     <SectionHeading title="Execution Plan" />
                     <ol className="mt-4 space-y-3 text-sm leading-5 text-[var(--patch-text)]">
-                      <li>1. Inspect repository structure and auth router.</li>
-                      <li>2. Search login endpoint password validation context.</li>
-                      <li>3. Add login success and invalid password tests.</li>
-                      <li>4. Run pytest and ruff check.</li>
-                      <li>5. Generate diff for human review.</li>
+                      <li>1. Connect a GitHub PAT for authenticated repository and diff access.</li>
+                      <li>2. Connect a repository from Stream 2.</li>
+                      <li>3. Submit TaskCreate to queue an agent run.</li>
+                      <li>4. Watch live WebSocket events on /run/:id.</li>
+                      <li>5. Review GitHub diff and request follow-up work if needed.</li>
                     </ol>
                   </Card>
                   <Card className="p-5">
-                    <SectionHeading title="Tool Calls" />
+                    <SectionHeading title="Live Contracts" />
                     <div className="mt-4 space-y-3">
-                      <ToolCall label="search_code" value="app/routers/auth.py / score 0.89" />
-                      <ToolCall label="read_file" value="tests/conftest.py" />
-                      <ToolCall label="run_command" value="uv run pytest" />
-                      <ToolCall label="get_git_diff" value="2 files changed" />
+                      <ToolCall label="GET /repositories" value={`${repositories.length} connected`} />
+                      <ToolCall label="GET /tasks" value={`${tasks.length} recent tasks`} />
+                      <ToolCall label="GET /agent_runs" value={`${runs.length} recent runs`} />
+                      <ToolCall label="GET /me/dashboard" value={formatDashboardUsage(dashboardRead)} />
+                      <ToolCall label="WS /agent_runs/:id" value="opens after task submit" />
                     </div>
                   </Card>
                 </div>
@@ -254,21 +271,28 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                   className="hidden h-10 items-center gap-2 rounded-full border border-[var(--patch-border)] bg-[var(--patch-bg)] px-4 text-sm text-[var(--patch-ink)] transition hover:bg-[var(--patch-border)] md:flex"
                 >
                   <Terminal size={15} />
-                  pytest + ruff
+                  live events
                 </button>
                 <div className="ml-auto flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setActive("run")}
+                    onClick={() => setActive("task")}
                     className="flex h-10 items-center gap-2 rounded-full bg-[var(--patch-accent)] px-4 text-sm font-medium text-white"
                   >
                     <Play size={16} />
-                    Start run
+                    Create run
                   </button>
                   <button
                     type="button"
                     aria-label="Open review"
-                    onClick={() => setActive("diff")}
+                    onClick={() => {
+                      if (primaryRun) {
+                        void navigate({ to: "/run/$id/diff", params: { id: primaryRun.id } });
+                        return;
+                      }
+
+                      setActive("diff");
+                    }}
                     className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--patch-ink)] text-white"
                   >
                     <ArrowRight size={18} />
@@ -288,7 +312,7 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                     label="Branch"
                     value={primaryTask?.target_branch ?? primaryRepository?.default_branch ?? "main"}
                   />
-                  <StatusLine label="Run endpoint" value={`/agent_runs/${primaryRun.id}`} />
+                  <StatusLine label="Run endpoint" value="/run/:id after task submission" />
                   <StatusLine label="Repository ID" value={primaryRepository?.id ?? "not selected"} />
                 </div>
               </Card>
@@ -299,43 +323,55 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                   <JourneyItem label="Describe task" value="instruction captured" active />
                   <JourneyItem label="Agent works" value="plan, tools, command logs" active />
                   <JourneyItem label="Review diff" value="current decision point" />
-                  <JourneyItem label="Create PR" value="after approval" />
+                  <JourneyItem label="Open PR" value="after agent succeeds" />
                 </div>
               </Card>
 
               <Card className="p-5">
                 <SectionHeading title="Verification" />
                 <div className="mt-4 space-y-3">
-                  <StatusLine label="pytest" value="12 passed" />
-                  <StatusLine label="ruff" value="passed" />
-                  <StatusLine label="retry budget" value="1 attempt" />
+                  <StatusLine label="Run checks" value="rendered from live tool timeline" />
+                  <StatusLine label="Terminal state" value="succeeded, failed, or cancelled" />
+                  <StatusLine label="Feedback" value="queues a child run on the same PR branch" />
                 </div>
               </Card>
 
               <Card className="p-5">
                 <SectionHeading title="Diff Review" action={<Badge tone="inverse">ready</Badge>} />
                 <p className="mt-3 text-sm leading-5 text-[var(--patch-muted)]">
-                  Next best action: inspect changed files, then approve or reject. Rejection ends the MVP run and clears
-                  the workspace.
+                  Next best action after a successful run: inspect changed files, request follow-up changes, or open the
+                  pull request on GitHub.
                 </p>
-                <div className="mt-4 space-y-3 text-sm">
-                  {diffFileRows.map((file) => (
-                    <FileRow
-                      key={file.file_path}
-                      path={file.file_path}
-                      additions={`+${file.additions}`}
-                      deletions={`-${file.deletions}`}
-                    />
-                  ))}
-                </div>
+                <p className="mt-4 rounded-[18px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-sm leading-6 text-[var(--patch-muted)]">
+                  Diff files are loaded from /agent_runs/:id/diff on a run-scoped review route.
+                </p>
                 <div className="mt-5 grid gap-3">
-                  <Button onClick={() => setActive("diff")}>
+                  <Button
+                    onClick={() => {
+                      if (primaryRun) {
+                        void navigate({ to: "/run/$id/diff", params: { id: primaryRun.id } });
+                        return;
+                      }
+
+                      setActive("diff");
+                    }}
+                  >
                     <FileCode2 size={15} />
                     Open Diff
                   </Button>
-                  <Button variant="secondary" onClick={() => setActive("pr")}>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      if (primaryRun) {
+                        void navigate({ to: "/run/$id/pr", params: { id: primaryRun.id } });
+                        return;
+                      }
+
+                      setActive("pr");
+                    }}
+                  >
                     <GitPullRequest size={15} />
-                    Approve PR
+                    Open PR
                   </Button>
                 </div>
               </Card>
@@ -346,7 +382,7 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
                   Guardrails
                 </div>
                 <p className="mt-3 text-sm leading-6 text-[var(--patch-on-dark-muted)]">
-                  Blocked commands, secret protection, isolated workspace, and human approval are enforced for the MVP
+                  Blocked commands, secret protection, isolated workspace, and follow-up review are enforced for the MVP
                   flow.
                 </p>
               </Card>
