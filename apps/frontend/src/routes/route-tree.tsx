@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, Outlet } from "@tanstack/react-router";
 import { LoginPage } from "../sections/login-page";
+import { SignUpPage } from "../sections/signup-page";
 import type { ScreenId } from "../wireframe-data";
 import ScreenView from "./screen-view";
 
@@ -28,10 +29,16 @@ const loginRoute = createRoute({
   path: "login",
   component: LoginPage,
 });
+const signupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "signup",
+  component: SignUpPage,
+});
 
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
+  signupRoute,
   dashboardRoute,
   repoRoute,
   taskRoute,

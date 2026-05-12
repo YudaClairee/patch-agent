@@ -212,7 +212,13 @@ async function fetchJson<TResponse>(path: string, init: RequestInit = {}) {
     return undefined as TResponse;
   }
 
-  return (await response.json()) as TResponse;
+  const responseText = await response.text();
+
+  if (!responseText) {
+    return undefined as TResponse;
+  }
+
+  return JSON.parse(responseText) as TResponse;
 }
 
 export function createAgentRunWebSocket(id: string) {

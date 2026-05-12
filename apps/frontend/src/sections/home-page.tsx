@@ -11,7 +11,6 @@ import {
   GitBranch,
   GitPullRequest,
   MessageSquare,
-  Moon,
   Play,
   Plus,
   Search,
@@ -135,13 +134,13 @@ export function HomePage({ setActive, dashboardRead }: SetActiveProps & { dashbo
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <button
+            {/* <button
               type="button"
               className="hidden h-10 items-center gap-2 rounded-full bg-[var(--patch-chip)] px-4 text-sm font-medium text-[var(--patch-ink)] backdrop-blur-[20px] md:flex"
             >
               <Moon size={16} />
               Focus
-            </button>
+            </button> */}
             <button
               type="button"
               onClick={() => setActive("repo")}
