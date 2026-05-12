@@ -1,9 +1,8 @@
 import logging
-import uuid
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
@@ -46,7 +45,7 @@ def _to_read(repo: Repository, session: Session) -> RepositoryRead:
     latest_index = session.exec(
         select(CodebaseIndex)
         .where(CodebaseIndex.repository_id == repo.id)
-        .order_by(CodebaseIndex.indexed_at.desc().nullslast())
+        .order_by(CodebaseIndex.indexed_at.desc().nullslast()) # type: ignore
     ).first()
 
     return RepositoryRead(
@@ -76,7 +75,7 @@ def list_repositories(
     return [_to_read(r, session) for r in repos]
 
 
-@router.post("/", response_model=RepositoryRead, status_code=201)
+@router.post("/", response_model=RepositoryRead, status_code=status.HTTP_201_CREATED)
 def create_repository(
     body: RepositoryCreate,
     session: Session = Depends(get_session),
@@ -101,7 +100,7 @@ def create_repository(
             session=session,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
     collection_name = _get_collection_name(str(repo.id), repo.default_branch)
     
@@ -140,8 +139,8 @@ def delete_repository(
             session=session,
         )
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
     return Response(status_code=204)

@@ -61,7 +61,7 @@ def _build_agent(workspace_path: str, repository_id: str, branch: str) -> Agent:
     model = LiteLLM(
         id="openrouter/google/gemini-2.0-flash-001",
         api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
+        base_url=settings.openrouter_base_url, # type: ignore
     )
 
     @tool
@@ -149,7 +149,7 @@ def _build_agent(workspace_path: str, repository_id: str, branch: str) -> Agent:
             workspace_run_command, workspace_run_test, workspace_run_lint,
             codebase_search_code, codebase_get_code_context, codebase_index,
         ],
-        show_tool_calls=True
+        show_tool_calls=True # type: ignore
     )
 
 async def run_agent_stream(
@@ -167,7 +167,7 @@ async def run_agent_stream(
         span.set_attribute("instruction", instruction)
         
         try:
-            async for event in agent.run_stream(message=instruction, max_turns=15):
+            async for event in agent.run_stream(message=instruction, max_turns=15): # type: ignore
                 if hasattr(event, "content") and event.content:
                     yield f"data: {json.dumps({'type': 'text_delta', 'content': event.content})}\n\n"
                 

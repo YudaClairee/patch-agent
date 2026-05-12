@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from uuid import UUID
 
 from github import Github, GithubException
@@ -67,6 +68,8 @@ def connect_repo(
         clone_url=gh_repo.clone_url,
         default_branch=gh_repo.default_branch,
         language=gh_repo.language,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
     )
     session.add(repo)
     session.commit()

@@ -1,7 +1,7 @@
+# ruff: noqa: E402
+
 import sys
 from unittest.mock import MagicMock, patch
-
-sys.modules['src.models.agent_run'] = MagicMock()
 
 import uuid
 from uuid import UUID
@@ -9,6 +9,10 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
+
+# Temporary isolation patch until Stream 3 model registry merge.
+# Prevents global SQLAlchemy mapper initialization crashes caused by incomplete relationships.
+sys.modules['src.models.agent_run'] = MagicMock()
 
 @pytest.fixture
 def mock_session():
@@ -58,14 +62,17 @@ def test_get_repositories_returns_user_repos(client: TestClient, mock_session: M
     fake_repo.created_at = datetime.now(timezone.utc)
     fake_repo.updated_at = datetime.now(timezone.utc)
     
+    call_state = {"called": False}
+    
     def exec_side_effect(*args, **kwargs):
         mock_result = MagicMock()
-        if not hasattr(exec_side_effect, "called"):
-            exec_side_effect.called = True
+        if not call_state["called"]:
+            call_state["called"] = True
             mock_result.all.return_value = [fake_repo]
         else:
             mock_result.first.return_value = None
         return mock_result
+
 
     mock_session.exec.side_effect = exec_side_effect
 

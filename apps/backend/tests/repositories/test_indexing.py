@@ -1,5 +1,4 @@
 import uuid
-from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,7 +19,7 @@ def index_row(repo_row):
     idx.repository_id = repo_row.id
     idx.branch = "main"
     idx.status = IndexStatus.pending
-    idx.chroma_collection_name = f"repo_test_main_123"
+    idx.chroma_collection_name = "repo_test_main_123"
     idx.chunk_count = 0
     idx.error_message = None
     idx.indexed_at = None

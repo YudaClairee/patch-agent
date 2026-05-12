@@ -6,12 +6,12 @@ def test_list_files_returns_files(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("print('hello')")
     result = list_files(str(tmp_path))
     assert result["count"] == 1
-    assert "main.py" in result["files"]
+    assert "main.py" in result["files"] # type: ignore
 
 def test_list_files_excludes_blocked(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("SECRET=123")
     result = list_files(str(tmp_path))
-    assert ".env" not in result["files"]
+    assert ".env" not in result["files"] # type: ignore
     assert result["count"] == 0
 
 def test_read_file_returns_content(tmp_path: Path) -> None:
@@ -36,4 +36,4 @@ def test_write_file_raises_on_blocked_path(tmp_path: Path) -> None:
 def test_search_file_finds_match(tmp_path: Path) -> None:
     (tmp_path / "auth_router.py").write_text("pass")
     result = search_file(str(tmp_path), "auth")
-    assert "auth_router.py" in result["matches"]
+    assert "auth_router.py" in result["matches"] # type: ignore
