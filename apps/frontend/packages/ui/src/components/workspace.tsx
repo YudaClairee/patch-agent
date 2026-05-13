@@ -1,5 +1,5 @@
 import { FileCode2 } from "lucide-react";
-import { type ReactNode, useId } from "react";
+import { type ComponentProps, type ReactNode, useId } from "react";
 import { patchClasses } from "../classes";
 import { cn } from "../lib/utils";
 import { Input } from "./input";
@@ -33,21 +33,23 @@ export function StatusLine({ label, value, tone = "light" }: StatusLineProps) {
       : "border border-[var(--patch-border)] bg-[var(--patch-bg)] text-[var(--patch-ink)]";
 
   return (
-    <div className={`flex items-center justify-between gap-3 rounded-[18px] px-3 py-2 text-sm ${styles}`}>
-      <span className="text-inherit opacity-70">{label}</span>
-      <span className="font-semibold text-inherit">{value}</span>
+    <div
+      className={cn("grid min-h-16 min-w-0 content-start gap-1.5 rounded-[18px] px-3 py-3 text-sm leading-5", styles)}
+    >
+      <span className="min-w-0 text-inherit opacity-70">{label}</span>
+      <span className="min-w-0 font-semibold text-inherit [overflow-wrap:anywhere]">{value}</span>
     </div>
   );
 }
 
-type FieldProps = {
+type FieldProps = Omit<ComponentProps<typeof Input>, "id" | "placeholder"> & {
   label: string;
   placeholder: string;
   icon?: ReactNode;
   secure?: boolean;
 };
 
-export function Field({ label, placeholder, icon, secure = false }: FieldProps) {
+export function Field({ label, placeholder, icon, secure = false, type = "text", ...inputProps }: FieldProps) {
   const fieldId = useId();
 
   return (
@@ -57,7 +59,7 @@ export function Field({ label, placeholder, icon, secure = false }: FieldProps) 
       </div>
       <div className="flex min-h-11 items-center gap-2 rounded-[16px] border border-[var(--patch-border)] bg-[var(--patch-bg)] px-3 transition focus-within:border-[var(--patch-ink)]">
         {icon && <span className={patchClasses.text.body}>{icon}</span>}
-        <Input id={fieldId} type={secure ? "password" : "text"} placeholder={placeholder} />
+        <Input id={fieldId} type={secure ? "password" : type} placeholder={placeholder} {...inputProps} />
       </div>
     </label>
   );

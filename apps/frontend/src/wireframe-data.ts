@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { apiEndpoints, type DashboardRead, patchApi, type RepositoryRead } from "./lib/api";
 
 export const screens = [
   { id: "home", label: "Home" },
@@ -8,6 +9,7 @@ export const screens = [
   { id: "run", label: "Agent Run" },
   { id: "diff", label: "Diff Review" },
   { id: "pr", label: "PR Result" },
+  { id: "settings", label: "GitHub PAT" },
 ] as const;
 
 export type ScreenId = (typeof screens)[number]["id"];
@@ -21,80 +23,146 @@ export const screenRoutes = {
   run: "/run",
   diff: "/diff",
   pr: "/pr",
+  settings: "/settings/github",
 } as const satisfies Record<ScreenId, string>;
 
-export const repoRows = [
-  { name: "fastapi-auth-app", branch: "main", status: "Ready", lang: "Python" },
-  { name: "patch-web", branch: "develop", status: "Indexed", lang: "React" },
-  { name: "mini-ecommerce-api", branch: "main", status: "Ready", lang: "FastAPI" },
-];
-
-export const recentRuns = [
-  { task: "Add unit tests for login endpoint", repo: "fastapi-auth-app", status: "running" },
-  { task: "Fix navbar responsive bug", repo: "patch-web", status: "running" },
-  { task: "Refactor product service", repo: "mini-ecommerce-api", status: "succeeded" },
-];
+export const emptyDashboardRead: DashboardRead = {
+  repository_count: 0,
+  active_run_count: 0,
+  succeeded_run_count: 0,
+  today_run_count: 0,
+  daily_run_quota: 0,
+};
 
 export type SetActiveProps = {
   setActive: SetActive;
 };
 
-export type WorkspaceSummary = {
-  repositoryCount: number;
-  activeRunCount: number;
-  succeededCount: number;
-  pullRequestCount: number;
-  verificationStatus: string;
-  usageLabel: string;
-};
+export function repositoryLabel(repository: RepositoryRead) {
+  return `${repository.github_owner}/${repository.github_repo}`;
+}
 
-const workspaceSummary: WorkspaceSummary = {
-  repositoryCount: repoRows.length,
-  activeRunCount: recentRuns.filter((run) => run.status === "running").length,
-  succeededCount: recentRuns.filter((run) => run.status === "succeeded").length,
-  pullRequestCount: 7,
-  verificationStatus: "agent autonomous - tests gated - PR auto-opened",
-  usageLabel: "Daily agent run usage (6/15)",
-};
+export function formatDashboardUsage(dashboard: DashboardRead) {
+  if (dashboard.daily_run_quota <= 0) {
+    return "Daily agent run usage unavailable";
+  }
 
-export function useWorkspaceSummary() {
+  return `Daily agent run usage (${dashboard.today_run_count}/${dashboard.daily_run_quota})`;
+}
+
+export function findRepository(repository_id: string, repositories: RepositoryRead[]) {
+  return repositories.find((repository) => repository.id === repository_id);
+}
+
+export function useDashboardRead() {
   return useQuery({
-    queryKey: ["patch", "workspace-summary"],
-    queryFn: async () => workspaceSummary,
-    initialData: workspaceSummary,
-    staleTime: Number.POSITIVE_INFINITY,
+    queryKey: ["patch", apiEndpoints.dashboard],
+    queryFn: patchApi.getDashboard,
+    retry: false,
   });
 }
 
-export const statusSteps = ["queued", "running", "succeeded", "failed"] as const;
+export function useRepositories() {
+  return useQuery({
+    queryKey: ["patch", apiEndpoints.repositories],
+    queryFn: patchApi.listRepositories,
+    retry: false,
+  });
+}
+
+export function useTasks(limit = 50) {
+  return useQuery({
+    queryKey: ["patch", apiEndpoints.tasks, limit],
+    queryFn: () => patchApi.listTasks(limit),
+    retry: false,
+  });
+}
+
+export function useAgentRuns(limit = 50) {
+  return useQuery({
+    queryKey: ["patch", apiEndpoints.agentRuns, limit],
+    queryFn: () => patchApi.listAgentRuns(limit),
+    retry: false,
+  });
+}
+
+export function useGitHubCredentials() {
+  return useQuery({
+    queryKey: ["patch", apiEndpoints.githubCredentials],
+    queryFn: patchApi.listGitHubCredentials,
+    retry: false,
+  });
+}
+
+export function useAgentRun(id: string | undefined) {
+  return useQuery({
+    queryKey: ["patch", id ? apiEndpoints.agentRun(id) : "agent-run:missing"],
+    queryFn: () => patchApi.getAgentRun(id ?? ""),
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+export function useAgentRunEvents(id: string | undefined, limit = 50) {
+  return useQuery({
+    queryKey: ["patch", id ? apiEndpoints.agentRunEvents(id, limit) : "agent-run-events:missing", limit],
+    queryFn: () => patchApi.getAgentRunEvents(id ?? "", limit),
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+export function useAgentRunPullRequest(id: string | undefined) {
+  return useQuery({
+    queryKey: ["patch", id ? apiEndpoints.agentRunPullRequest(id) : "agent-run-pull-request:missing"],
+    queryFn: () => patchApi.getAgentRunPullRequest(id ?? ""),
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+export function useAgentRunDiff(id: string | undefined) {
+  return useQuery({
+    queryKey: ["patch", id ? apiEndpoints.agentRunDiff(id) : "agent-run-diff:missing"],
+    queryFn: () => patchApi.getAgentRunDiff(id ?? ""),
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
+
+export const statusSteps = ["queued", "running", "succeeded", "failed", "cancelled"] as const;
 
 export const screenMeta: Record<ScreenId, { title: string; subtitle: string }> = {
   home: {
     title: "P.A.T.C.H. Home",
-    subtitle: "Submit a coding task and let the autonomous agent open the pull request.",
+    subtitle: "Submit a coding task and watch the autonomous agent open a pull request.",
   },
   dashboard: {
     title: "Operations",
-    subtitle: "Live workspace for repositories, runs, and pull request output.",
+    subtitle: "Live workspace for repositories, tasks, and agent run output.",
   },
   repo: {
     title: "Repository Setup",
-    subtitle: "Source, branch, credential reference, and verification commands.",
+    subtitle: "Connect GitHub repositories with the Stream 2 repository contract.",
   },
   task: {
     title: "New Coding Task",
-    subtitle: "Target context and instruction for the next agent run.",
+    subtitle: "Send TaskCreate to POST /tasks with repository, branch, and instruction.",
   },
   run: {
     title: "Agent Run",
-    subtitle: "Live tool-call timeline and final pull request handoff.",
+    subtitle: "Live agent work from /ws/agent_runs/{id}, backed by event history.",
   },
   diff: {
     title: "Diff Review",
-    subtitle: "Inspect the agent's pull request and request follow-up changes.",
+    subtitle: "Inspect /agent_runs/{id}/diff and submit follow-up feedback.",
   },
   pr: {
     title: "PR Result",
-    subtitle: "Final branch and GitHub pull request link.",
+    subtitle: "Pull request data from /agent_runs/{id}/pull_request.",
+  },
+  settings: {
+    title: "GitHub PAT",
+    subtitle: "Connect the encrypted GitHub credential used for repository access and diff fetches.",
   },
 };

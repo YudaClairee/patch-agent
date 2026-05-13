@@ -2,7 +2,7 @@
 
 React + Vite frontend prototype untuk P.A.T.C.H. Aplikasi ini memakai TanStack Router, TanStack Query, Tailwind CSS, Framer Motion, Lucide React, Biome, pnpm workspace, dan shared UI package lokal `@patch/ui`.
 
-Dokumentasi lengkap frontend dan panduan integrasi backend ada di [FRONTEND.md](./FRONTEND.md). Product requirement ada di [PRD Project P A T C H.md](./PRD%20Project%20P%20A%20T%20C%20H.md).
+Panduan kontrak API backend ada di [api_contract.md](./markdown/api_contract.md). Product requirement ada di [PRD Project P A T C H.md](./markdown/PRD%20Project%20P%20A%20T%20C%20H.md).
 
 ## Quick Start
 
@@ -47,6 +47,7 @@ apps/frontend/
       route-tree.tsx      route definitions
       screen-view.tsx     route-to-section bridge
     sections/
+      login-page.tsx
       home-page.tsx
       app-shell.tsx
       dashboard.tsx
@@ -63,6 +64,7 @@ apps/frontend/
 
 ```text
 /           home
+/login      login
 /dashboard  operations dashboard
 /repo       repository setup
 /task       new task
@@ -84,5 +86,5 @@ Shared package berada di `packages/ui` dan berisi component primitive, token CSS
 ## Notes
 
 - Data UI saat ini masih mock di `src/wireframe-data.ts`.
-- Backend integration contract ada di bagian **Backend Handoff Guide** pada [FRONTEND.md](./FRONTEND.md).
+- Backend integration contract ada di [api_contract.md](./markdown/api_contract.md).
 - File Vite aktif hanya `vite.config.mjs`; tidak ada generated route tree yang dipakai saat ini.
