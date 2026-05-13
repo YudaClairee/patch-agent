@@ -128,6 +128,18 @@ export type DashboardRead = {
   daily_run_quota: number;
 };
 
+export type GithubRepoSummary = {
+  full_name: string;
+  owner: string;
+  name: string;
+  default_branch: string;
+  private: boolean;
+  language: string | null;
+  description: string | null;
+  html_url: string;
+  updated_at: string | null;
+};
+
 export type GitHubCredentialRead = {
   id: string;
   github_username: string;
@@ -192,8 +204,14 @@ export const apiEndpoints = {
   agentRunDiff: (id: string) => `/agent_runs/${id}/diff`,
   agentRunFeedback: (id: string) => `/agent_runs/${id}/feedback`,
   dashboard: "/me/dashboard",
+  githubRepositories: "/github/repositories",
+  githubOauthStart: "/auth/github/start",
   agentRunWebSocket: (id: string) => `/ws/agent_runs/${id}`,
 } as const;
+
+export function githubOauthStartUrl() {
+  return `${apiBaseUrl}${apiEndpoints.githubOauthStart}`;
+}
 
 export class ApiClientError extends Error {
   status: number;
@@ -285,6 +303,7 @@ export const patchApi = {
       method: "DELETE",
     }),
   listRepositories: () => fetchJson<RepositoryRead[]>(apiEndpoints.repositories),
+  listGithubRepositories: () => fetchJson<GithubRepoSummary[]>(apiEndpoints.githubRepositories),
   createRepository: (body: { owner: string; name: string }) =>
     fetchJson<RepositoryRead>(apiEndpoints.repositories, {
       method: "POST",

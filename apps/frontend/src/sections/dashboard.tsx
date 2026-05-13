@@ -1,8 +1,15 @@
 import { Badge, Button, Card, SectionHeading } from "@patch/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Activity, CalendarDays, FileCode2, FolderGit, type LucideProps, Plus } from "lucide-react";
+import { Activity, CalendarDays, FileCode2, FolderGit, Github, type LucideProps, Plus } from "lucide-react";
 import React, { type ReactElement } from "react";
-import type { AgentRunListItemRead, DashboardRead } from "../lib/api";
+import {
+  type AgentRunListItemRead,
+  type DashboardRead,
+  apiEndpoints,
+  githubOauthStartUrl,
+  patchApi,
+} from "../lib/api";
 import {
   findRepository,
   repositoryLabel,
@@ -14,15 +21,49 @@ import {
 
 export function Dashboard({ setActive, dashboardRead }: SetActiveProps & { dashboardRead: DashboardRead }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: repositories = [], isLoading: repositoriesLoading, isError: repositoriesError } = useRepositories();
   const { data: tasks = [] } = useTasks();
   const { data: runs = [], isLoading: runsLoading, isError: runsError } = useAgentRuns();
+  const githubRepos = useQuery({
+    queryKey: ["patch", apiEndpoints.githubRepositories],
+    queryFn: patchApi.listGithubRepositories,
+    retry: false,
+  });
+  const githubConnected = !githubRepos.isError;
+  const connectRepoMutation = useMutation({
+    mutationFn: (body: { owner: string; name: string }) => patchApi.createRepository(body),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["patch", apiEndpoints.repositories] });
+    },
+  });
+  const connectedKey = (r: { github_owner: string; github_repo: string }) =>
+    `${r.github_owner}/${r.github_repo}`.toLowerCase();
+  const connectedSet = new Set(repositories.map(connectedKey));
   const primaryRepository = repositories[0];
   const primaryTask = tasks[0];
   const taskById = new Map(tasks.map((task) => [task.id, task]));
 
   return (
     <div className="space-y-5">
+      {!githubConnected && (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+          <div className="flex items-center gap-3">
+            <Github size={20} />
+            <div>
+              <div className="text-base font-semibold tracking-[-0.006em] text-[var(--patch-ink)]">
+                Connect your GitHub account
+              </div>
+              <div className="text-sm text-[var(--patch-muted)]">
+                Required to list repositories and let the agent open pull requests.
+              </div>
+            </div>
+          </div>
+          <Button onClick={() => { window.location.href = githubOauthStartUrl(); }}>
+            Connect GitHub
+          </Button>
+        </Card>
+      )}
       <div className="grid gap-4 md:grid-cols-4">
         <Metric icon={<FolderGit />} label="Repositories" value={String(dashboardRead.repository_count)} />
         <Metric icon={<Activity />} label="Active Runs" value={String(dashboardRead.active_run_count)} />
@@ -107,6 +148,52 @@ export function Dashboard({ setActive, dashboardRead }: SetActiveProps & { dashb
           </div>
         </Card>
       </div>
+
+      {githubConnected && (
+        <Card className="p-5">
+          <SectionHeading
+            title="Your GitHub repositories"
+            action={
+              <Button variant="chip" onClick={() => void githubRepos.refetch()}>
+                Refresh
+              </Button>
+            }
+          />
+          <div className="mt-4 space-y-2">
+            {githubRepos.isLoading && <PanelState label="Loading GitHub repositories..." />}
+            {githubRepos.isError && <PanelState label="Unable to load GitHub repositories." tone="error" />}
+            {!githubRepos.isLoading && (githubRepos.data?.length ?? 0) === 0 && (
+              <PanelState label="No repositories visible to this GitHub account." />
+            )}
+            {(githubRepos.data ?? []).map((repo) => {
+              const isConnected = connectedSet.has(repo.full_name.toLowerCase());
+              return (
+                <div
+                  key={repo.full_name}
+                  className="flex items-center justify-between gap-4 rounded-[18px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-[var(--patch-ink)]">
+                      {repo.full_name} {repo.private ? <Badge>private</Badge> : null}
+                    </div>
+                    <div className="truncate text-xs text-[var(--patch-muted)]">
+                      {repo.default_branch} · {repo.language ?? "—"}
+                      {repo.description ? ` · ${repo.description}` : ""}
+                    </div>
+                  </div>
+                  <Button
+                    variant={isConnected ? "chip" : "secondary"}
+                    disabled={isConnected || connectRepoMutation.isPending}
+                    onClick={() => connectRepoMutation.mutate({ owner: repo.owner, name: repo.name })}
+                  >
+                    {isConnected ? "Connected" : "Use this repo"}
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card className="p-5">
         <SectionHeading title="Current Route" action={<Badge tone="inverse">verifying</Badge>} />
