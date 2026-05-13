@@ -13,7 +13,7 @@ from src.schemas.agent_run import AgentRunRead
 from src.schemas.agent_run_event import AgentRunEventRead
 from src.schemas.diff import DiffFileRead
 from src.schemas.pull_request import PullRequestRead
-from src.services.credentials import decrypt_token
+from src.services.credentials import get_active_token
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +72,7 @@ def get_agent_run_diff(
     if not repository:
         raise HTTPException(status_code=404, detail="Repository not found")
 
-    try:
-        pat = decrypt_token(None)
-    except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+    pat = get_active_token(session, user.id)
 
     url = f"https://api.github.com/repos/{repository.github_owner}/{repository.github_repo}/pulls/{pr.github_pr_number}/files"
     headers = {

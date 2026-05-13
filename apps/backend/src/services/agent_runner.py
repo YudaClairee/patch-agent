@@ -16,7 +16,7 @@ from src.core.database import engine
 from src.models.agent_run import AgentRun
 from src.models.github_credential import GithubCredential
 from src.models.enums import RunStatus
-from src.ai.tools.pr_tools import decrypt_token
+from src.services.credentials import decrypt_token
 from src.services.sandboxing import get_sandbox_options
 
 celery_app = Celery(

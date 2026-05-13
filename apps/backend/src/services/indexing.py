@@ -4,6 +4,7 @@ import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import quote, urlparse, urlunparse
 
 from sqlmodel import Session
 
@@ -19,20 +20,38 @@ from src.core.database import get_session
 from src.models.codebase_index import CodebaseIndex
 from src.models.enums import IndexStatus
 from src.models.repository import Repository
+from src.services.credentials import get_active_credential
+from src.core.security import decrypt_github_token
 
 logger = logging.getLogger(__name__)
 
 
-def _clone_repo(clone_url: str, target_dir: Path, branch: str) -> Path:
+def _authed_clone_url(clone_url: str, token: str | None) -> str:
+    """Inject a token into an HTTPS GitHub clone URL for non-public access."""
+    if not token or not clone_url.startswith("https://"):
+        return clone_url
+    parsed = urlparse(clone_url)
+    netloc = f"x-access-token:{quote(token, safe='')}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return urlunparse(parsed._replace(netloc=netloc))
+
+
+def _clone_repo(clone_url: str, target_dir: Path, branch: str, token: str | None = None) -> Path:
+    authed_url = _authed_clone_url(clone_url, token)
     result = subprocess.run(
-        ["git", "clone", "--depth=1", "--branch", branch, clone_url, str(target_dir)],
+        ["git", "clone", "--depth=1", "--branch", branch, authed_url, str(target_dir)],
         capture_output=True,
         text=True,
         timeout=300,
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"Clone failed: {result.stderr}")
+        # Scrub token from any error output before raising.
+        stderr = result.stderr
+        if token:
+            stderr = stderr.replace(token, "***")
+        raise RuntimeError(f"Clone failed: {stderr}")
 
     return target_dir
 
@@ -55,6 +74,14 @@ def _run_index(
     session.add(index_row)
     session.commit()
 
+    token: str | None = None
+    cred = get_active_credential(session, repo_row.user_id)
+    if cred is not None:
+        try:
+            token = decrypt_github_token(cred.encrypted_token)
+        except ValueError:
+            logger.warning("Failed to decrypt GitHub token for user %s; cloning anonymously", repo_row.user_id)
+
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             target_workspace = Path(tmpdir) / "repo"
@@ -62,6 +89,7 @@ def _run_index(
                 repo_row.clone_url,
                 target_workspace,
                 branch,
+                token=token,
             )
 
             sha_result = subprocess.run(

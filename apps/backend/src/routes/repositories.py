@@ -11,6 +11,7 @@ from src.core.database import get_session
 from src.models.codebase_index import CodebaseIndex
 from src.models.enums import IndexStatus
 from src.models.repository import Repository
+from src.services.credentials import get_active_token
 from src.services.indexing import index_repository
 from src.services.repositories import connect_repo, disconnect_repo
 from src.ai.tools.rag_tools import _get_collection_name
@@ -86,10 +87,8 @@ def create_repository(
     Body: {owner, name} — locked by Stream 4 contract.
     Kicks off index_repository Celery task immediately after connect.
     """
-    # stub: decrypt_token
-    # TODO: pat = decrypt_token(session.get(GithubCredential, user.active_credential_id))
-    pat = ""  # stream 1 will provide this
     user_uuid = UUID(user.id) if isinstance(user.id, str) else user.id
+    pat = get_active_token(session, user_uuid)
 
     try:
         repo = connect_repo(

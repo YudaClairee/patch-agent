@@ -2,26 +2,17 @@ import os
 import uuid
 from urllib.parse import urlparse
 
-from cryptography.fernet import Fernet
 from github import Github, GithubException
 from sqlmodel import Session, select
 
-from src.core.config import settings
 from src.core.database import engine
 from src.models.agent_run import AgentRun
-from src.models.github_credential import GithubCredential
 from src.models.pull_request import PullRequest
 from src.models.tool_call import ToolCall
 from src.models.enums import PRState, ToolCallStatus
 from src.ai.tools.git_tools import create_branch, commit_changes, push_branch, get_git_diff
 
 WORKSPACE = "/workspace"
-
-
-def decrypt_token(credential: GithubCredential) -> str:
-    """Decrypt a Fernet-encrypted GitHub PAT from the database."""
-    f = Fernet(settings.fernet_key.encode())
-    return f.decrypt(credential.encrypted_token).decode()
 
 
 def _parse_github_owner_repo(clone_url: str) -> tuple[str, str]:
