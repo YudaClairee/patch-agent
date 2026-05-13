@@ -1,16 +1,33 @@
 import { Badge, Button, Card, SectionHeading } from "@patch/ui";
-import { Activity, FileCode2, FolderGit, GitPullRequest, type LucideProps, Plus } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
+import { Activity, CalendarDays, FileCode2, FolderGit, type LucideProps, Plus } from "lucide-react";
 import React, { type ReactElement } from "react";
-import { recentRuns, repoRows, type SetActiveProps, type WorkspaceSummary } from "../wireframe-data";
+import type { AgentRunListItemRead, DashboardRead } from "../lib/api";
+import {
+  findRepository,
+  repositoryLabel,
+  type SetActiveProps,
+  useAgentRuns,
+  useRepositories,
+  useTasks,
+} from "../wireframe-data";
 
-export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { workspaceSummary: WorkspaceSummary }) {
+export function Dashboard({ setActive, dashboardRead }: SetActiveProps & { dashboardRead: DashboardRead }) {
+  const navigate = useNavigate();
+  const { data: repositories = [], isLoading: repositoriesLoading, isError: repositoriesError } = useRepositories();
+  const { data: tasks = [] } = useTasks();
+  const { data: runs = [], isLoading: runsLoading, isError: runsError } = useAgentRuns();
+  const primaryRepository = repositories[0];
+  const primaryTask = tasks[0];
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+
   return (
     <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-4">
-        <Metric icon={<FolderGit />} label="Repositories" value={String(workspaceSummary.repositoryCount)} />
-        <Metric icon={<Activity />} label="Active Runs" value={String(workspaceSummary.activeRunCount)} />
-        <Metric icon={<FileCode2 />} label="Succeeded" value={String(workspaceSummary.succeededCount)} />
-        <Metric icon={<GitPullRequest />} label="PR Created" value={String(workspaceSummary.pullRequestCount)} />
+        <Metric icon={<FolderGit />} label="Repositories" value={String(dashboardRead.repository_count)} />
+        <Metric icon={<Activity />} label="Active Runs" value={String(dashboardRead.active_run_count)} />
+        <Metric icon={<FileCode2 />} label="Succeeded" value={String(dashboardRead.succeeded_run_count)} />
+        <Metric icon={<CalendarDays />} label="Runs Today" value={String(dashboardRead.today_run_count)} />
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
@@ -25,9 +42,14 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
             }
           />
           <div className="mt-4 divide-y divide-[var(--patch-border)]">
-            {repoRows.map((repo) => (
+            {repositoriesLoading && <PanelState label="Loading repositories..." />}
+            {repositoriesError && <PanelState label="Unable to load repositories." tone="error" />}
+            {!repositoriesLoading && !repositoriesError && repositories.length === 0 && (
+              <PanelState label="No repositories connected yet." />
+            )}
+            {repositories.map((repository) => (
               <button
-                key={repo.name}
+                key={repository.id}
                 type="button"
                 onClick={() => setActive("repo")}
                 className="flex w-full items-center justify-between gap-4 py-4 text-left"
@@ -38,14 +60,14 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
                   </div>
                   <div className="min-w-0">
                     <div className="truncate text-base font-semibold tracking-[-0.006em] text-[var(--patch-ink)]">
-                      {repo.name}
+                      {repositoryLabel(repository)}
                     </div>
                     <div className="text-sm text-[var(--patch-muted)]">
-                      Branch: {repo.branch} / {repo.lang}
+                      Branch: {repository.default_branch} / {repository.language ?? "Unknown"}
                     </div>
                   </div>
                 </div>
-                <Badge tone={repo.status === "Indexed" ? "inverse" : "default"}>{repo.status}</Badge>
+                <Badge tone="inverse">connected</Badge>
               </button>
             ))}
           </div>
@@ -55,28 +77,33 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
           <SectionHeading
             title="Recent Runs"
             action={
-              <Button variant="chip" onClick={() => setActive("run")}>
-                View all
+              <Button variant="chip" onClick={() => setActive("task")}>
+                New task
               </Button>
             }
           />
           <div className="mt-4 space-y-3">
-            {recentRuns.map((run) => (
-              <button
-                key={run.task}
-                type="button"
-                onClick={() => setActive(run.status === "succeeded" ? "diff" : "run")}
-                className="flex w-full items-center justify-between gap-4 rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-left transition hover:bg-[var(--patch-surface)]"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold tracking-[-0.003em] text-[var(--patch-ink)]">
-                    {run.task}
-                  </div>
-                  <div className="mt-1 text-sm text-[var(--patch-muted)]">{run.repo}</div>
-                </div>
-                <Badge tone={run.status === "review_required" ? "inverse" : "default"}>{run.status}</Badge>
-              </button>
-            ))}
+            {runsLoading && <PanelState label="Loading recent runs..." />}
+            {runsError && <PanelState label="Unable to load recent runs." tone="error" />}
+            {!runsLoading && !runsError && runs.length === 0 && <PanelState label="No agent runs submitted yet." />}
+            {runs.map((run) => {
+              const task = taskById.get(run.task_id);
+              const title = task?.title ?? run.pull_request?.title ?? run.id;
+              const targetBranch = task?.target_branch ?? run.branch_name ?? "branch pending";
+              const repository = task ? findRepository(task.repository_id, repositories) : undefined;
+
+              return (
+                <RunListItem
+                  key={run.id}
+                  run={run}
+                  title={title}
+                  subtitle={repository ? repositoryLabel(repository) : targetBranch}
+                  onOpenRun={() => void navigate({ to: "/run/$id", params: { id: run.id } })}
+                  onOpenDiff={() => void navigate({ to: "/run/$id/diff", params: { id: run.id } })}
+                  onOpenPr={() => void navigate({ to: "/run/$id/pr", params: { id: run.id } })}
+                />
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -84,11 +111,68 @@ export function Dashboard({ setActive, workspaceSummary }: SetActiveProps & { wo
       <Card className="p-5">
         <SectionHeading title="Current Route" action={<Badge tone="inverse">verifying</Badge>} />
         <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          <RouteStep label="Repo indexed" value="fastapi-auth-app" active />
-          <RouteStep label="Agent verifying" value="pytest + ruff" active />
-          <RouteStep label="Review gate" value="diff approval required" />
+          <RouteStep
+            label="Repository"
+            value={primaryRepository ? repositoryLabel(primaryRepository) : "not selected"}
+            active
+          />
+          <RouteStep label="Task" value={primaryTask?.target_branch ?? "target_branch"} active />
+          <RouteStep label="Review" value="/agent_runs/{id}/diff" />
         </div>
       </Card>
+    </div>
+  );
+}
+
+function RunListItem({
+  run,
+  title,
+  subtitle,
+  onOpenRun,
+  onOpenDiff,
+  onOpenPr,
+}: {
+  run: AgentRunListItemRead;
+  title: string;
+  subtitle: string;
+  onOpenRun: () => void;
+  onOpenDiff: () => void;
+  onOpenPr: () => void;
+}) {
+  const hasPullRequest = Boolean(run.pull_request);
+
+  return (
+    <div className="rounded-[22px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4">
+      <button type="button" onClick={onOpenRun} className="flex w-full items-center justify-between gap-4 text-left">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold tracking-[-0.003em] text-[var(--patch-ink)]">{title}</div>
+          <div className="mt-1 text-sm text-[var(--patch-muted)]">{subtitle}</div>
+        </div>
+        <Badge>{run.status}</Badge>
+      </button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="secondary" className="min-h-8 px-3 py-1 text-xs" onClick={onOpenRun}>
+          Run
+        </Button>
+        <Button variant="chip" className="min-h-8 px-3 py-1 text-xs" disabled={!hasPullRequest} onClick={onOpenDiff}>
+          Diff
+        </Button>
+        <Button variant="chip" className="min-h-8 px-3 py-1 text-xs" disabled={!hasPullRequest} onClick={onOpenPr}>
+          PR
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PanelState({ label, tone = "muted" }: { label: string; tone?: "muted" | "error" }) {
+  return (
+    <div
+      className={`rounded-[20px] border border-[var(--patch-border)] bg-[var(--patch-bg)] p-4 text-sm leading-6 ${
+        tone === "error" ? "text-[var(--patch-ink)]" : "text-[var(--patch-muted)]"
+      }`}
+    >
+      {label}
     </div>
   );
 }

@@ -41,7 +41,8 @@ class CodebaseIndex(SQLModel, table=True):
     chroma_collection_name: str = Field(max_length=63)
     chunk_count: int = Field(default=0, nullable=False)
     status: IndexStatus = Field(
-        sa_column=Column(SAEnum(IndexStatus, name="index_status"), nullable=False)
+        default=IndexStatus.pending,
+        sa_column=Column(SAEnum(IndexStatus, name="index_status"), nullable=False),
     )
     error_message: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True)

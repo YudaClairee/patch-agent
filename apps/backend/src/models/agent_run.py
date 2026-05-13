@@ -83,7 +83,7 @@ class AgentRun(SQLModel, table=True):
         back_populates="agent_run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-    pull_request: "PullRequest | None" = Relationship(
+    pull_request: "PullRequest" = Relationship( # ini ada ku ilangin | None nya, karena SQLModel nya gabisa resolve syntax union, jadi error pas tes, dan minta bantu AI katanya better dihapus dan pake uselist=False aja
         back_populates="agent_run",
         sa_relationship_kwargs={"cascade": "all, delete-orphan", "uselist": False},
     )
