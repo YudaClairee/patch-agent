@@ -1,8 +1,12 @@
 import { Badge, Button, cn, patchClasses } from "@patch/ui";
-import { motion } from "framer-motion";
-import { Activity, ChevronRight, FolderGit, Plus, ShieldCheck } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { AnimatePresence, motion } from "framer-motion";
+import { Activity, ChevronRight, FolderGit, Loader2, LogOut, Plus, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
-import { type ScreenId, type SetActive, screenMeta, screens, type WorkspaceSummary } from "../wireframe-data";
+import { useState } from "react";
+import { ApiClientError, type DashboardRead, patchApi } from "../lib/api";
+import { formatDashboardUsage, type ScreenId, type SetActive, screenMeta, screens } from "../wireframe-data";
 
 type ActiveScreenProps = {
   active: ScreenId;
@@ -12,10 +16,42 @@ type ActiveScreenProps = {
 export function AppShell({
   active,
   setActive,
-  workspaceSummary,
+  dashboardRead,
   children,
-}: ActiveScreenProps & { workspaceSummary: WorkspaceSummary; children: ReactNode }) {
+}: ActiveScreenProps & { dashboardRead: DashboardRead; children: ReactNode }) {
   const meta = screenMeta[active];
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [logoutState, setLogoutState] = useState<"idle" | "loading" | "error">("idle");
+  const [logoutError, setLogoutError] = useState<string | undefined>();
+  const isLoggingOut = logoutState === "loading";
+
+  const finishLogout = () => {
+    queryClient.clear();
+    void navigate({ to: "/login" });
+  };
+
+  const handleLogout = async () => {
+    if (isLoggingOut) {
+      return;
+    }
+
+    setLogoutState("loading");
+    setLogoutError(undefined);
+
+    try {
+      await patchApi.logout();
+      finishLogout();
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 401) {
+        finishLogout();
+        return;
+      }
+
+      setLogoutState("error");
+      setLogoutError(error instanceof Error ? error.message : "Log out gagal. Coba lagi.");
+    }
+  };
 
   return (
     <div className={cn("h-screen overflow-hidden", patchClasses.appSurface)}>
@@ -56,11 +92,11 @@ export function AppShell({
                 <Activity size={16} />
                 Agent pool
               </div>
-              <Badge>{workspaceSummary.activeRunCount} active</Badge>
+              <Badge>{dashboardRead.active_run_count} active</Badge>
             </div>
             <div className="mt-4 space-y-3">
-              <MiniMeter label="CPU" value="42%" width="w-[42%]" />
-              <MiniMeter label="Queue" value="3 runs" width="w-[68%]" />
+              <MiniMeter label="Active" value={`${dashboardRead.active_run_count} runs`} width="w-[42%]" />
+              <MiniMeter label="Today" value={`${dashboardRead.today_run_count} runs`} width="w-[68%]" />
             </div>
           </div>
 
@@ -70,8 +106,9 @@ export function AppShell({
               Review gate
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--patch-on-dark-muted)]">
-              Pull request dibuat setelah diff disetujui.
+              Diff review opens after a pull request exists.
             </p>
+            <LogoutButton isLoading={isLoggingOut} onClick={handleLogout} className="mt-4 w-full" />
           </div>
         </aside>
 
@@ -91,6 +128,7 @@ export function AppShell({
                 {screen.label}
               </button>
             ))}
+            <LogoutButton isLoading={isLoggingOut} onClick={handleLogout} className="shrink-0" />
           </div>
 
           <div className="shrink-0 border-b border-[var(--patch-border)] bg-[var(--patch-surface)] px-5 py-4">
@@ -117,12 +155,29 @@ export function AppShell({
                   <FolderGit size={15} />
                   Repositories
                 </Button>
+                <Button variant="secondary" onClick={() => setActive("settings")}>
+                  <ShieldCheck size={15} />
+                  GitHub PAT
+                </Button>
                 <Button onClick={() => setActive("task")}>
                   <Plus size={15} />
                   New Task
                 </Button>
               </div>
             </div>
+            <AnimatePresence mode="wait">
+              {logoutError && (
+                <motion.p
+                  key="logout-error"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="mt-3 rounded-[18px] border border-[var(--patch-border-strong)] bg-[var(--patch-bg)] px-4 py-3 text-sm text-[var(--patch-ink)]"
+                >
+                  {logoutError}
+                </motion.p>
+              )}
+            </AnimatePresence>
           </div>
 
           <motion.div
@@ -136,12 +191,33 @@ export function AppShell({
           </motion.div>
 
           <footer className="flex h-9 shrink-0 items-center justify-between border-t border-[var(--patch-border)] bg-[var(--patch-surface)] px-4 text-xs text-[var(--patch-muted)]">
-            <span className="truncate">workspace / fastapi-auth-app / main</span>
-            <span className="hidden md:inline">{workspaceSummary.verificationStatus}</span>
+            <span className="truncate">workspace / live Stream API</span>
+            <span className="hidden md:inline">{formatDashboardUsage(dashboardRead)}</span>
           </footer>
         </main>
       </div>
     </div>
+  );
+}
+
+type LogoutButtonProps = {
+  isLoading: boolean;
+  onClick: () => void;
+  className?: string;
+};
+
+function LogoutButton({ isLoading, onClick, className }: LogoutButtonProps) {
+  return (
+    <Button
+      variant="danger"
+      onClick={onClick}
+      disabled={isLoading}
+      aria-label="Log out dari workspace"
+      className={cn("active:scale-[0.98]", className)}
+    >
+      {isLoading ? <Loader2 size={15} className="animate-spin" /> : <LogOut size={15} />}
+      {isLoading ? "Logging out" : "Log out"}
+    </Button>
   );
 }
 
