@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -31,6 +31,23 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  chroma:
+    image: chromadb/chroma:0.5.23
+    ports:
+      - "8001:8000"
+    volumes:
+      - .data/chromadb:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      ANONYMIZED_TELEMETRY: "FALSE"
+    healthcheck:
+        test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
+        start_period: 10s
+    restart: unless-stopped
+
   backend:
     build: ./apps/backend
     ports:
@@ -38,12 +55,35 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URL: redis://valkey:6379/0
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
     env_file:
       - ./apps/backend/.env
     depends_on:
       postgres:
         condition: service_healthy
       valkey:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: ./apps/backend
+    command: "uv run celery -A src.celery_app worker --loglevel=info --queues=indexing"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
+      REDIS_URL: redis://valkey:6379/0
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+    env_file:
+      - ./apps/backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
     restart: unless-stopped
 

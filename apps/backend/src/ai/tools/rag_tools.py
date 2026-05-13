@@ -1,103 +1,100 @@
-import chromadb
-from chromadb import Collection
+import logging
 from pathlib import Path
-from openai import OpenAI
+
+import chromadb
 from chonkie import SemanticChunker
+from openai import OpenAI
+
+from src.ai.indexing_helpers import build_index
 from src.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 EMBEDDING_MODEL = "text-embedding-3-small"
+
 IGNORED_PATHS: list[str] = [
     ".git", "node_modules", ".venv", "dist", "build",
     ".env", ".env.local", ".pem", ".key", ".png", ".jpg", ".zip",
-    "__pycache__", ".pyc", ".DS_Store", ".pytest_cache"
+    "__pycache__", ".pyc", ".DS_Store", ".pytest_cache",
 ]
-_CHROMA_PATH = str(Path(".data/chromadb").resolve())
-_chroma_client = chromadb.PersistentClient(path=_CHROMA_PATH)
 
-_chunker = SemanticChunker(embedding_model="minishlab/potion-base-32M", chunk_size=256, threshold=0.5)
+# PersistentClient does not work with ephemeral agent containers
+# because indexes become container-local and are destroyed per run.
+# HttpClient allows all workers/agents to share the same Chroma instance.
+_chroma_client = chromadb.HttpClient(
+    host=settings.chroma_host,
+    port=settings.chroma_port,
+)
+
+_openai_client = OpenAI(
+    api_key=settings.openrouter_api_key,
+    base_url=settings.openrouter_base_url,
+)
+
+_chunker = SemanticChunker(
+    embedding_model="minishlab/potion-base-32M",
+    chunk_size=256,
+    threshold=0.5,
+)
+
 
 def _get_embedding(text: str) -> list[float]:
-    client = OpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
-    )
-    response = client.embeddings.create(model=EMBEDDING_MODEL, input=text)
+    response = _openai_client.embeddings.create(model=EMBEDDING_MODEL, input=text)
     return response.data[0].embedding
 
+
 def _should_ignore(file_path: str) -> bool:
+    # TODO: Compare by path parts instead of simple substring for better accuracy in future iteration
     for pattern in IGNORED_PATHS:
         if pattern in file_path:
             return True
     return False
 
+
+def _get_collection_name(repository_id: str, branch: str) -> str:
+    return f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
+
+
 def index_codebase(workspace_path: str, repository_id: str, branch: str) -> dict[str, str]:
-    """Index all source code files in the workspace into ChromaDB."""
-    collection_name = f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
+    collection_name = _get_collection_name(repository_id, branch)
 
-    try:
-        _chroma_client.delete_collection(collection_name)
-    except Exception:
-        pass
+    indexed = build_index(
+        workspace_path=workspace_path,
+        repository_id=repository_id,
+        branch=branch,
+        collection_name=collection_name,
+        chroma_client=_chroma_client,
+        chunker=_chunker,
+        embedding_fn=_get_embedding,
+        ignore_fn=_should_ignore,
+    )
 
-    collection: Collection = _chroma_client.create_collection(collection_name)
-    base = Path(workspace_path)
-    
-    indexed = 0
-    documents, embeddings, metadatas, ids = [], [], [], []
+    return {
+        "status": "success",
+        "indexed_chunks": str(indexed),
+    }
 
-    for file_path in base.rglob("*"):
-        if not file_path.is_file():
-            continue
-        rel_path = str(file_path.relative_to(base))
-        if _should_ignore(rel_path):
-            continue
 
-        print(f"Indexing: {rel_path}...")
-            
-        try:
-            content = file_path.read_text(encoding="utf-8", errors="ignore")
-            if not content.strip():
-                continue
-                
-            chunks = _chunker.chunk(text=content)
-            
-            for i, chunk in enumerate(chunks):
-                if not chunk.text.strip():
-                    continue
-                
-                chunk_id = f"{repository_id}_{rel_path}_{i}"
-                documents.append(chunk.text)
-                embeddings.append(_get_embedding(chunk.text))
-                metadatas.append({
-                    "repository_id": repository_id,
-                    "branch": branch,
-                    "file_path": rel_path,
-                    "chunk_index": i,
-                })
-                ids.append(chunk_id)
-                indexed += 1
-                
-        except Exception:
-            continue
-
-    if documents:
-        collection.add(
-            documents=documents,
-            embeddings=embeddings,
-            metadatas=metadatas,
-            ids=ids,
-        )
-
-    return {"status": "success", "indexed_chunks": str(indexed)}
-
-def search_code(query: str, repository_id: str, branch: str, n_results: int = 5) -> dict[str, list[dict]]:
+def search_code(
+    query: str,
+    repository_id: str,
+    branch: str,
+    n_results: int = 5,
+) -> dict[str, list[dict]]:
     """Search for relevant code snippets in the indexed repository."""
-    collection_name = f"repo_{repository_id}_{branch}".replace("/", "_")[:63]
+    collection_name = _get_collection_name(repository_id, branch)
 
     try:
         collection = _chroma_client.get_collection(collection_name)
-    except Exception:
-        raise FileNotFoundError("Collection not found. Codebase indexing is required.")
+    except ValueError as exc:
+        logger.warning(
+            "Collection lookup failed for %s: %s",
+            collection_name,
+            exc,
+        )
+        raise FileNotFoundError(
+            "Collection not found. Codebase indexing is required."
+        ) from exc
 
     query_embedding = _get_embedding(query)
     results = collection.query(
@@ -110,10 +107,10 @@ def search_code(query: str, repository_id: str, branch: str, n_results: int = 5)
     if results["documents"]:
         for doc, meta, dist in zip(
             results["documents"][0],
-            results["metadatas"][0],
-            results["distances"][0],
+            results["metadatas"][0], # type: ignore
+            results["distances"][0], # type: ignore
         ):
-            if not _should_ignore(meta.get("file_path", "")):
+            if not _should_ignore(meta.get("file_path", "")): # type: ignore
                 output.append({
                     "file_path": meta.get("file_path", ""),
                     "chunk_index": meta.get("chunk_index", 0),
@@ -122,6 +119,7 @@ def search_code(query: str, repository_id: str, branch: str, n_results: int = 5)
                 })
 
     return {"results": output}
+
 
 def get_code_context(workspace_path: str, file_path: str) -> dict[str, str]:
     """Get the full content of a specific code file for better context."""

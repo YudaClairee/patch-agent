@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     langfuse_base_url: str = ""
 
     fernet_key: str = ""  # ini buat encrypt github token
+    jwt_secret: str = ""  # ini buat sign jwt
+
+    chroma_host: str = "chroma" # service name di docker-compose, "localhost" untuk lokal
+    chroma_port: int = 8000  # port di docker network, 8000 untuk lokal
 
     # Docker / sandbox settings for agent containers
     docker_agent_image: str = "patch/agent:latest"
