@@ -24,6 +24,17 @@ class Settings(BaseSettings):
     fernet_key: str = ""  # ini buat encrypt github token
     jwt_secret: str = ""  # ini buat sign jwt
 
+    # Session cookie / JWT
+    session_cookie_name: str = "patch_session"
+    session_ttl_hours: int = 24 * 7
+    environment: str = "development"  # set to "production" to enable Secure cookies
+
+    # GitHub OAuth App credentials
+    github_oauth_client_id: str = ""
+    github_oauth_client_secret: str = ""
+    github_oauth_redirect_uri: str = "http://localhost:8000/auth/github/callback"
+    frontend_url: str = "http://localhost:5173"
+
     chroma_host: str = "chroma" # service name di docker-compose, "localhost" untuk lokal
     chroma_port: int = 8000  # port di docker network, 8000 untuk lokal
 
