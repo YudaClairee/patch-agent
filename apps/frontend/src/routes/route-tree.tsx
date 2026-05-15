@@ -1,93 +1,60 @@
-import { createRootRoute, createRoute, Outlet } from "@tanstack/react-router";
-import { ConnectPat } from "../sections/auth/connect-pat";
+import { createRootRoute, createRoute, Outlet, redirect } from "@tanstack/react-router";
+import { ApiClientError, patchApi } from "../lib/api";
 import { LoginPage } from "../sections/login-page";
-import { SignUpPage } from "../sections/signup-page";
-import type { ScreenId } from "../wireframe-data";
-import ScreenView from "./screen-view";
-
-type ScreenRoutePath = "/" | "dashboard" | "repo" | "task" | "run" | "diff" | "pr" | "settings/github";
+import { RepoDetail } from "../sections/repo-detail";
+import { RunDetail } from "../sections/run-detail";
+import { RunsList } from "../sections/runs-list";
 
 const rootRoute = createRootRoute({
   component: () => <Outlet />,
 });
 
-const makeScreenRoute = <TPath extends ScreenRoutePath>(path: TPath, initialScreen: ScreenId) =>
-  createRoute({
-    getParentRoute: () => rootRoute,
-    path,
-    component: () => <ScreenView initialScreen={initialScreen} />,
-  });
+const requireAuth = async () => {
+  try {
+    await patchApi.getMe();
+  } catch (err) {
+    if (err instanceof ApiClientError && err.status === 401) {
+      throw redirect({ to: "/login" });
+    }
+    throw err;
+  }
+};
 
-const indexRoute = makeScreenRoute("/", "home");
-const dashboardRoute = makeScreenRoute("dashboard", "dashboard");
-const repoRoute = makeScreenRoute("repo", "repo");
-const taskRoute = makeScreenRoute("task", "task");
-const runRoute = makeScreenRoute("run", "run");
-const diffRoute = makeScreenRoute("diff", "diff");
-const prRoute = makeScreenRoute("pr", "pr");
-const settingsRoute = makeScreenRoute("settings/github", "settings");
+const indexRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/",
+  beforeLoad: requireAuth,
+  component: RunsList,
+});
+
 const runDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "run/$id",
+  beforeLoad: requireAuth,
   component: RunDetailRoute,
 });
-const runDiffRoute = createRoute({
+
+function RunDetailRoute() {
+  const { id } = runDetailRoute.useParams();
+  return <RunDetail runId={id} />;
+}
+
+const repoDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "run/$id/diff",
-  component: RunDiffRoute,
+  path: "repo/$id",
+  beforeLoad: requireAuth,
+  component: RepoDetailRoute,
 });
-const runPrRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "run/$id/pr",
-  component: RunPrRoute,
-});
+
+function RepoDetailRoute() {
+  const { id } = repoDetailRoute.useParams();
+  return <RepoDetail repoId={id} />;
+}
+
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "login",
   component: LoginPage,
 });
-const signupRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "signup",
-  component: SignUpPage,
-});
-const connectPatRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "auth/connect-pat",
-  component: ConnectPat,
-});
 
-function RunDetailRoute() {
-  const { id } = runDetailRoute.useParams();
-
-  return <ScreenView initialScreen="run" runId={id} />;
-}
-
-function RunDiffRoute() {
-  const { id } = runDiffRoute.useParams();
-
-  return <ScreenView initialScreen="diff" runId={id} />;
-}
-
-function RunPrRoute() {
-  const { id } = runPrRoute.useParams();
-
-  return <ScreenView initialScreen="pr" runId={id} />;
-}
-
-export const routeTree = rootRoute.addChildren([
-  indexRoute,
-  loginRoute,
-  signupRoute,
-  connectPatRoute,
-  dashboardRoute,
-  repoRoute,
-  taskRoute,
-  runRoute,
-  runDetailRoute,
-  diffRoute,
-  runDiffRoute,
-  prRoute,
-  runPrRoute,
-  settingsRoute,
-]);
+export const routeTree = rootRoute.addChildren([indexRoute, loginRoute, runDetailRoute, repoDetailRoute]);

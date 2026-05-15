@@ -43,6 +43,7 @@ export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed" | "ca
 export type AgentRunRead = {
   id: string;
   task_id: string;
+  instruction: string | null;
   status: AgentRunStatus;
   parent_run_id: string | null;
   follow_up_instruction: string | null;
@@ -71,6 +72,7 @@ export type PullRequestSummaryRead = {
 export type AgentRunListItemRead = {
   id: string;
   task_id: string;
+  instruction: string | null;
   status: AgentRunStatus;
   branch_name: string | null;
   queued_at: string;
@@ -120,14 +122,6 @@ export type PullRequestRead = {
   updated_at: string;
 };
 
-export type DashboardRead = {
-  repository_count: number;
-  active_run_count: number;
-  succeeded_run_count: number;
-  today_run_count: number;
-  daily_run_quota: number;
-};
-
 export type GithubRepoSummary = {
   full_name: string;
   owner: string;
@@ -138,15 +132,6 @@ export type GithubRepoSummary = {
   description: string | null;
   html_url: string;
   updated_at: string | null;
-};
-
-export type GitHubCredentialRead = {
-  id: string;
-  github_username: string;
-  token_scopes: string;
-  created_at: string;
-  last_used_at: string | null;
-  revoked_at: string | null;
 };
 
 export type FeedbackCreate = {
@@ -185,25 +170,25 @@ export type ApiErrorResponse =
     };
 
 export const apiEndpoints = {
-  signup: "/auth/signup",
-  login: "/auth/login",
   logout: "/auth/logout",
   me: "/me",
-  githubCredentials: "/me/github-credentials",
-  githubCredential: (id: string) => `/me/github-credentials/${id}`,
   repositories: "/repositories",
   repository: (id: string) => `/repositories/${id}`,
   tasks: "/tasks",
   tasksWithLimit: (limit: number) => `/tasks?limit=${limit}`,
   task: (task_id: string) => `/tasks/${task_id}`,
   agentRuns: "/agent_runs",
-  agentRunsWithLimit: (limit: number) => `/agent_runs?limit=${limit}`,
+  agentRunsList: (limit: number, repositoryId?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (repositoryId) params.set("repository_id", repositoryId);
+    return `/agent_runs?${params.toString()}`;
+  },
   agentRun: (id: string) => `/agent_runs/${id}`,
   agentRunEvents: (id: string, limit?: number) => `/agent_runs/${id}/events${limit ? `?limit=${limit}` : ""}`,
   agentRunPullRequest: (id: string) => `/agent_runs/${id}/pull_request`,
   agentRunDiff: (id: string) => `/agent_runs/${id}/diff`,
   agentRunFeedback: (id: string) => `/agent_runs/${id}/feedback`,
-  dashboard: "/me/dashboard",
+  agentRunCancel: (id: string) => `/agent_runs/${id}/cancel`,
   githubRepositories: "/github/repositories",
   githubOauthStart: "/auth/github/start",
   agentRunWebSocket: (id: string) => `/ws/agent_runs/${id}`,
@@ -277,31 +262,11 @@ export function createAgentRunWebSocket(id: string) {
 }
 
 export const patchApi = {
-  signup: (body: { email: string; password: string; name?: string | null }) =>
-    fetchJson<UserRead>(apiEndpoints.signup, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  login: (body: { email: string; password: string }) =>
-    fetchJson<UserRead>(apiEndpoints.login, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   logout: () =>
     fetchJson<void>(apiEndpoints.logout, {
       method: "POST",
     }),
   getMe: () => fetchJson<UserRead>(apiEndpoints.me),
-  createGitHubCredential: (body: { token: string }) =>
-    fetchJson<UserRead>(apiEndpoints.githubCredentials, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  listGitHubCredentials: () => fetchJson<GitHubCredentialRead[]>(apiEndpoints.githubCredentials),
-  deleteGitHubCredential: (id: string) =>
-    fetchJson<void>(apiEndpoints.githubCredential(id), {
-      method: "DELETE",
-    }),
   listRepositories: () => fetchJson<RepositoryRead[]>(apiEndpoints.repositories),
   listGithubRepositories: () => fetchJson<GithubRepoSummary[]>(apiEndpoints.githubRepositories),
   createRepository: (body: { owner: string; name: string }) =>
@@ -320,7 +285,8 @@ export const patchApi = {
     }),
   listTasks: (limit = 50) => fetchJson<TaskRead[]>(apiEndpoints.tasksWithLimit(limit)),
   getTask: (task_id: string) => fetchJson<TaskRead>(apiEndpoints.task(task_id)),
-  listAgentRuns: (limit = 50) => fetchJson<AgentRunListItemRead[]>(apiEndpoints.agentRunsWithLimit(limit)),
+  listAgentRuns: (limit = 50, repositoryId?: string) =>
+    fetchJson<AgentRunListItemRead[]>(apiEndpoints.agentRunsList(limit, repositoryId)),
   getAgentRun: (id: string) => fetchJson<AgentRunRead>(apiEndpoints.agentRun(id)),
   getAgentRunEvents: (id: string, limit = 50) => fetchJson<AgentRunEventRead[]>(apiEndpoints.agentRunEvents(id, limit)),
   getAgentRunPullRequest: (id: string) => fetchJson<PullRequestRead>(apiEndpoints.agentRunPullRequest(id)),
@@ -330,5 +296,8 @@ export const patchApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  getDashboard: () => fetchJson<DashboardRead>(apiEndpoints.dashboard),
+  cancelAgentRun: (id: string) =>
+    fetchJson<AgentRunRead>(apiEndpoints.agentRunCancel(id), {
+      method: "POST",
+    }),
 };

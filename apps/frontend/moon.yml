@@ -1,6 +1,6 @@
 $schema: "https://moonrepo.dev/schemas/project.json"
 
-layer: "application"
+type: "application"
 language: "typescript"
 stack: "frontend"
 

@@ -127,11 +127,22 @@ export function useAgentRunStream(
           return;
         }
 
-        setEvents((current) => upsertFrame(current, frame));
+        // Negative sequences are synthetic/control frames (e.g. server-side
+        // status snapshots, transient runner status labels). Apply their state
+        // effects but keep them out of the visible timeline.
+        if (frame.sequence >= 0) {
+          setEvents((current) => upsertFrame(current, frame));
+        }
 
         const nextStatus = statusFromFrame(frame);
         if (nextStatus) {
           setStatus(nextStatus);
+          if (nextStatus === "succeeded" || nextStatus === "failed" || nextStatus === "cancelled") {
+            terminalReceived = true;
+            setConnectionStatus("closed");
+            socket?.close();
+            return;
+          }
         }
 
         if (frame.type === "error") {
@@ -144,8 +155,22 @@ export function useAgentRunStream(
         setError("Live connection failed. Reconnecting when possible.");
       });
 
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (closedByHook || terminalReceived) {
+          setConnectionStatus("closed");
+          return;
+        }
+
+        // Server-side refusals: 1000 normal close, 4001 unauthorized,
+        // 4004 run not found, 4005 backend misconfig. None are worth retrying.
+        if (event.code === 1000 || (event.code >= 4000 && event.code < 5000)) {
+          if (event.code === 4001) {
+            setError("Your session expired. Please sign in again.");
+          } else if (event.code === 4004) {
+            setError("Agent run not found.");
+          } else if (event.code === 4005) {
+            setError("Live event stream is unavailable.");
+          }
           setConnectionStatus("closed");
           return;
         }

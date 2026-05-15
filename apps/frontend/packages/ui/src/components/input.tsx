@@ -6,7 +6,7 @@ export function Input({ className, type = "text", ...props }: ComponentProps<"in
     <input
       type={type}
       className={cn(
-        "w-full bg-transparent text-sm text-[var(--patch-ink)] outline-none placeholder:text-[var(--patch-muted)] disabled:cursor-not-allowed disabled:opacity-50",
+        "w-full border border-[var(--patch-border)] bg-[var(--patch-surface)] px-2 py-1 text-sm text-[var(--patch-fg)] outline-none placeholder:text-[var(--patch-dim)] focus:border-[var(--patch-accent)] disabled:opacity-40",
         className,
       )}
       {...props}

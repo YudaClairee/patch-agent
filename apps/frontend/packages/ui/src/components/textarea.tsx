@@ -5,7 +5,7 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return (
     <textarea
       className={cn(
-        "resize-none bg-transparent text-base leading-6 text-[var(--patch-ink)] outline-none placeholder:text-[var(--patch-muted)] disabled:cursor-not-allowed disabled:opacity-50",
+        "w-full resize-y border border-[var(--patch-border)] bg-[var(--patch-surface)] px-2 py-1 text-sm leading-5 text-[var(--patch-fg)] outline-none placeholder:text-[var(--patch-dim)] focus:border-[var(--patch-accent)] disabled:opacity-40",
         className,
       )}
       {...props}

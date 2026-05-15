@@ -1,19 +1,20 @@
 :root {
-  --patch-accent: #0071e3;
-  --patch-accent-hover: #0077ed;
-  --patch-bg: #f5f5f7;
-  --patch-border: #e8e8ed;
-  --patch-border-strong: #d2d2d7;
-  --patch-chip: rgba(210, 210, 215, 0.64);
-  --patch-chip-hover: #dcdce1;
-  --patch-dark-border: #333333;
-  --patch-ink: #1d1d1f;
-  --patch-muted: #707070;
-  --patch-on-dark-muted: #d2d2d7;
-  --patch-surface: #ffffff;
-  --patch-text: #474747;
-  --patch-shadow-floating: 0 18px 40px rgba(29, 29, 31, 0.08);
-  --patch-on-dark-panel: rgba(255, 255, 255, 0.1);
-  --patch-surface-translucent: rgba(255, 255, 255, 0.7);
-  --patch-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --patch-bg: #0b0b0b;
+  --patch-surface: #111111;
+  --patch-border: #2a2a2a;
+  --patch-border-strong: #3a3a3a;
+  --patch-fg: #e6e6e6;
+  --patch-dim: #888888;
+  --patch-accent: #4ade80;
+  --patch-warn: #facc15;
+  --patch-error: #f87171;
+  --patch-font-mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+}
+
+html,
+body,
+#root {
+  background: var(--patch-bg);
+  color: var(--patch-fg);
+  font-family: var(--patch-font-mono);
 }
