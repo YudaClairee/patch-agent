@@ -16,3 +16,6 @@
 __pycache__
 
 .data/
+
+# Langfuse trace artifacts (dev exports)
+trace-*.json
