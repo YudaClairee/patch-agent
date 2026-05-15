@@ -12,9 +12,21 @@ class Settings(BaseSettings):
 
     redis_url: str = ""
 
+    # --- LLM (provider-agnostic, via LiteLLM model-id prefix) ---
+    # Examples:
+    #   openrouter/google/gemini-2.0-flash-001   (default)
+    #   openai/gpt-4o-mini
+    #   anthropic/claude-3-5-sonnet-20241022
+    #   gemini/gemini-2.0-flash
+    #   groq/llama-3.3-70b-versatile
+    llm_model_id: str = "openrouter/google/gemini-2.0-flash-001"
+    llm_api_key: str = ""
+    llm_base_url: str = ""  # blank → LiteLLM picks the provider default
+
+    # Legacy / deprecated — kept so existing .env files keep working.
     openai_api_key: str = ""
     openrouter_api_key: str = ""
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_base_url: str = ""
 
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
@@ -35,15 +47,21 @@ class Settings(BaseSettings):
     github_oauth_redirect_uri: str = "http://localhost:8000/auth/github/callback"
     frontend_url: str = "http://localhost:5173"
 
-    chroma_host: str = "chroma" # service name di docker-compose, "localhost" untuk lokal
-    chroma_port: int = 8000  # port di docker network, 8000 untuk lokal
-
     # Docker / sandbox settings for agent containers
     docker_agent_image: str = "patch/agent:latest"
     agent_memory_limit: str = "2g"
     agent_cpus: float = 1.0
     agent_pids_limit: int = 512
     agent_max_wall_time_sec: int = 900
+    agent_max_steps: int = 40
+    agent_duplicate_streak_limit: int = 3
+    agent_max_tool_output_chars: int = 4000
 
 
 settings = Settings()
+
+# Back-compat: if only legacy OPENROUTER_* vars are set, use them for the LLM.
+if not settings.llm_api_key and settings.openrouter_api_key:
+    settings.llm_api_key = settings.openrouter_api_key
+if not settings.llm_base_url and settings.openrouter_base_url:
+    settings.llm_base_url = settings.openrouter_base_url

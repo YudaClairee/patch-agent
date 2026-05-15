@@ -25,13 +25,6 @@ class ToolCallStatus(str, Enum):
     error = "error"
 
 
-class IndexStatus(str, Enum):
-    pending = "pending"
-    indexing = "indexing"
-    ready = "ready"
-    failed = "failed"
-
-
 class PRState(str, Enum):
     open = "open"
     closed = "closed"

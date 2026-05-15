@@ -1,4 +1,11 @@
+"""
+Terminal sentinel tool: creates (or comments on, for follow-ups) the GitHub PR.
+
+Inlines its own git ops via subprocess so it has no dependency on the deleted
+workspace_* tool wrappers.
+"""
 import os
+import subprocess
 import uuid
 from urllib.parse import urlparse
 
@@ -8,55 +15,42 @@ from sqlmodel import Session, select
 from src.core.database import engine
 from src.models.agent_run import AgentRun
 from src.models.pull_request import PullRequest
-from src.models.tool_call import ToolCall
-from src.models.enums import PRState, ToolCallStatus
-from src.ai.tools.git_tools import create_branch, commit_changes, push_branch, get_git_diff
+from src.models.enums import PRState
 
 WORKSPACE = "/workspace"
 
 
+def _run_git(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git"] + args,
+        cwd=WORKSPACE,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=check,
+    )
+
+
 def _parse_github_owner_repo(clone_url: str) -> tuple[str, str]:
-    """Parse owner and repo name from a GitHub clone URL (HTTPS or SSH)."""
     if clone_url.startswith("https://"):
         path = urlparse(clone_url).path.lstrip("/").removesuffix(".git")
     else:
-        # git@github.com:owner/repo.git
         path = clone_url.split(":")[-1].removesuffix(".git")
     owner, repo = path.split("/", 1)
     return owner, repo
 
 
-def _check_preconditions(agent_run_id: str) -> None:
-    """
-    Raise RuntimeError if tests or lint have not passed, or if there is no diff.
-    The agent must call run_test and run_lint (successfully) before submit_pull_request.
-    """
-    with Session(engine) as session:
-        successful_calls = session.exec(
-            select(ToolCall).where(
-                ToolCall.agent_run_id == uuid.UUID(agent_run_id),
-                ToolCall.status == ToolCallStatus.success,
-            )
-        ).all()
-
-    passed_tools = {tc.tool_name for tc in successful_calls}
-
-    if "workspace_run_test" not in passed_tools:
+def _check_has_changes() -> None:
+    diff = _run_git(["diff", "--stat"], check=False)
+    staged = _run_git(["diff", "--cached", "--stat"], check=False)
+    log_ahead = _run_git(["log", "--oneline", "@{upstream}..HEAD"], check=False)
+    if (
+        not diff.stdout.strip()
+        and not staged.stdout.strip()
+        and not log_ahead.stdout.strip()
+    ):
         raise RuntimeError(
-            "Precondition failed: run_test must complete successfully before creating a PR. "
-            "Run the test command first."
-        )
-    if "workspace_run_lint" not in passed_tools:
-        raise RuntimeError(
-            "Precondition failed: run_lint must complete successfully before creating a PR. "
-            "Run the lint command first."
-        )
-
-    diff = get_git_diff(WORKSPACE)
-    if not diff.get("stdout", "").strip():
-        raise RuntimeError(
-            "Precondition failed: no changes detected in the workspace. "
-            "Make code changes before creating a PR."
+            "No changes detected in the workspace. Make edits before submitting a PR."
         )
 
 
@@ -64,10 +58,8 @@ def submit_pull_request(title: str, body: str) -> dict:
     """
     Create or update a Pull Request for the current agent run.
 
-    Initial run: creates a new branch, commits, pushes, and opens a PR.
-    Follow-up run (PARENT_RUN_ID set): commits to the existing branch and adds a PR comment.
-
-    Preconditions: run_test and run_lint must have passed, and the diff must be non-empty.
+    Initial run: creates a new branch, commits, pushes, opens a PR.
+    Follow-up run (PARENT_RUN_ID set): commits to the parent's branch, comments on the PR.
     """
     agent_run_id = os.environ["AGENT_RUN_ID"]
     github_token = os.environ["GITHUB_TOKEN"]
@@ -76,8 +68,6 @@ def submit_pull_request(title: str, body: str) -> dict:
     repository_id = os.environ["REPOSITORY_ID"]
     parent_run_id = os.environ.get("PARENT_RUN_ID")
     head_branch = os.environ.get("HEAD_BRANCH")
-
-    _check_preconditions(agent_run_id)
 
     owner, repo_name = _parse_github_owner_repo(repo_clone_url)
     gh = Github(github_token)
@@ -92,15 +82,81 @@ def submit_pull_request(title: str, body: str) -> dict:
             body=body,
             gh_repo=gh_repo,
         )
-    else:
-        return _handle_initial(
-            agent_run_id=agent_run_id,
-            repository_id=repository_id,
-            base_branch=base_branch,
-            title=title,
-            body=body,
-            gh_repo=gh_repo,
-        )
+    return _handle_initial(
+        agent_run_id=agent_run_id,
+        repository_id=repository_id,
+        base_branch=base_branch,
+        title=title,
+        body=body,
+        gh_repo=gh_repo,
+    )
+
+
+def _stage_commit_push(branch: str, commit_message: str) -> None:
+    _run_git(["checkout", "-B", branch])
+    _run_git(["add", "-A"])
+    commit = _run_git(["commit", "-m", commit_message], check=False)
+    if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
+        raise RuntimeError(f"git commit failed: {commit.stderr or commit.stdout}")
+    _run_git(["push", "-u", "origin", branch])
+
+
+def _find_existing_pr(gh_repo, branch_name: str):
+    """Return the open PR for `branch_name` if one already exists, else None.
+    Used to recover from a partial submit (branch+PR created on GitHub but
+    DB row never written) — without this, the agent gets stuck because the
+    workspace is now clean and `create_pull` would error with "already exists"."""
+    owner = gh_repo.owner.login
+    pulls = gh_repo.get_pulls(state="open", head=f"{owner}:{branch_name}")
+    for pr in pulls:
+        return pr
+    return None
+
+
+def _upsert_pr_row(
+    agent_run_id: str,
+    repository_id: str,
+    branch_name: str,
+    base_branch: str,
+    title: str,
+    body: str,
+    pr,
+) -> None:
+    with Session(engine) as session:
+        run = session.get(AgentRun, uuid.UUID(agent_run_id))
+        if run is not None:
+            run.branch_name = branch_name
+            session.add(run)
+
+        existing = session.exec(
+            select(PullRequest).where(PullRequest.agent_run_id == uuid.UUID(agent_run_id))
+        ).first()
+        if existing is not None:
+            existing.github_pr_number = pr.number
+            existing.github_pr_id = pr.id
+            existing.title = f"[P.A.T.C.H.] {title}"
+            existing.body = body
+            existing.head_branch = branch_name
+            existing.base_branch = base_branch
+            existing.url = pr.html_url
+            existing.state = PRState.open
+            session.add(existing)
+        else:
+            session.add(
+                PullRequest(
+                    agent_run_id=uuid.UUID(agent_run_id),
+                    repository_id=uuid.UUID(repository_id),
+                    github_pr_number=pr.number,
+                    github_pr_id=pr.id,
+                    title=f"[P.A.T.C.H.] {title}",
+                    body=body,
+                    head_branch=branch_name,
+                    base_branch=base_branch,
+                    url=pr.html_url,
+                    state=PRState.open,
+                )
+            )
+        session.commit()
 
 
 def _handle_initial(
@@ -113,9 +169,23 @@ def _handle_initial(
 ) -> dict:
     branch_name = f"patch/task-{agent_run_id}"
 
-    create_branch(WORKSPACE, branch_name)
-    commit_changes(WORKSPACE, f"[P.A.T.C.H.] {title}")
-    push_branch(WORKSPACE, branch_name)
+    # Recovery path: a previous attempt may have pushed the branch and opened
+    # the PR but failed to persist the DB row. If so, just upsert and return —
+    # don't error with "no changes detected".
+    existing_pr = _find_existing_pr(gh_repo, branch_name)
+    if existing_pr is not None:
+        _upsert_pr_row(
+            agent_run_id, repository_id, branch_name, base_branch, title, body, existing_pr
+        )
+        return {
+            "status": "pr_recovered",
+            "pr_number": existing_pr.number,
+            "pr_url": existing_pr.html_url,
+            "branch": branch_name,
+        }
+
+    _check_has_changes()
+    _stage_commit_push(branch_name, f"[P.A.T.C.H.] {title}")
 
     try:
         pr = gh_repo.create_pull(
@@ -127,26 +197,7 @@ def _handle_initial(
     except GithubException as e:
         raise RuntimeError(f"Failed to create pull request: {e.data}") from e
 
-    with Session(engine) as session:
-        run = session.get(AgentRun, uuid.UUID(agent_run_id))
-        run.branch_name = branch_name
-        session.add(run)
-
-        pr_row = PullRequest(
-            agent_run_id=uuid.UUID(agent_run_id),
-            repository_id=uuid.UUID(repository_id),
-            github_pr_number=pr.number,
-            github_pr_id=pr.id,
-            title=f"[P.A.T.C.H.] {title}",
-            body=body,
-            head_branch=branch_name,
-            base_branch=base_branch,
-            url=pr.html_url,
-            state=PRState.open,
-        )
-        session.add(pr_row)
-        session.commit()
-
+    _upsert_pr_row(agent_run_id, repository_id, branch_name, base_branch, title, body, pr)
     return {
         "status": "pr_created",
         "pr_number": pr.number,
@@ -163,8 +214,15 @@ def _handle_follow_up(
     body: str,
     gh_repo,
 ) -> dict:
-    commit_changes(WORKSPACE, f"[P.A.T.C.H. follow-up] {title}")
-    push_branch(WORKSPACE, head_branch)
+    if not head_branch:
+        raise RuntimeError("HEAD_BRANCH not set; cannot resolve parent's branch for follow-up.")
+
+    _run_git(["checkout", head_branch], check=False)
+    _run_git(["add", "-A"])
+    commit = _run_git(["commit", "-m", f"[P.A.T.C.H. follow-up] {title}"], check=False)
+    if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
+        raise RuntimeError(f"git commit failed: {commit.stderr or commit.stdout}")
+    _run_git(["push", "origin", head_branch])
 
     with Session(engine) as session:
         existing_pr = session.exec(
@@ -173,6 +231,8 @@ def _handle_follow_up(
             )
         ).first()
 
+    pr_url = ""
+    pr_number = 0
     if existing_pr:
         try:
             gh_pr = gh_repo.get_pull(existing_pr.github_pr_number)
@@ -183,9 +243,13 @@ def _handle_follow_up(
             pr_number = existing_pr.github_pr_number
         except GithubException as e:
             raise RuntimeError(f"Failed to comment on pull request: {e.data}") from e
-    else:
-        pr_url = ""
-        pr_number = 0
+
+    with Session(engine) as session:
+        run = session.get(AgentRun, uuid.UUID(agent_run_id))
+        if run is not None:
+            run.branch_name = head_branch
+            session.add(run)
+            session.commit()
 
     return {
         "status": "follow_up_committed",

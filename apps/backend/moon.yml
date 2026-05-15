@@ -1,22 +1,59 @@
 $schema: "https://moonrepo.dev/schemas/project.json"
 
-layer: application
+type: application
 language: python
 
 tasks:
   install:
     command: "uv sync --all-packages"
+
+  docker-up:
+    command: "docker compose -f ../../docker-compose.yml up -d postgres valkey --wait"
+    options:
+      runInCI: false
+
+  docker-down:
+    command: "docker compose -f ../../docker-compose.yml down"
+    options:
+      runInCI: false
+
+  migrate:
+    command: "uv run alembic upgrade head"
+    options:
+      runInCI: false
+
+  build-agent:
+    command: "docker build -t patch/agent:latest -f Dockerfile.agent ."
+    inputs:
+      - "Dockerfile.agent"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/**/*"
+    options:
+      runInCI: false
+
+  # One-shot bring-up: containers → wait healthy → warm-up sleep → migrate → build agent image.
+  # The 5s sleep covers postgres's first-boot volume init, where pg_isready can flap.
+  setup:
+    command: "bash -lc 'moon run server:docker-up && echo \"Waiting 5s for postgres warm-up...\" && sleep 5 && moon run server:migrate && moon run server:build-agent'"
+    options:
+      runInCI: false
+
   dev:
     command: "uv run uvicorn src.main:app --reload --port 8000"
     options:
       runInCI: false
+
   worker:
-    command: "uv run celery --app src.worker.celery worker --loglevel=info"
+    command: "uv run celery --app src.celery_app worker --loglevel=info --queues=celery"
     options:
       runInCI: false
+
   lint:
     command: "uv run ruff check ."
+
   format:
     command: "uv run ruff format ."
+
   typecheck:
     command: "uv run ty check"

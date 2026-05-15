@@ -8,7 +8,7 @@ from fastapi import Depends, HTTPException, Request, WebSocket, status
 from sqlmodel import Session
 
 from src.core.config import settings
-from src.core.database import get_session
+from src.core.database import engine, get_session
 from src.core.security import decode_session_token
 from src.models.user import User
 
@@ -42,13 +42,17 @@ async def current_user(
     return _resolve_user(session, token)
 
 
-async def current_user_ws(
-    websocket: WebSocket,
-    session: Session = Depends(get_session),
-) -> User:
+async def current_user_ws(websocket: WebSocket) -> User:
+    """Resolve the session user from a WebSocket cookie.
+
+    Called directly from WS route handlers (not via FastAPI's dep injection),
+    so we open our own short-lived session here.
+    """
     token = websocket.cookies.get(settings.session_cookie_name)
     try:
-        return _resolve_user(session, token)
+        with Session(engine) as session:
+            return _resolve_user(session, token)
     except HTTPException:
-        await websocket.close(code=4401)
+        if websocket.client_state.name != "DISCONNECTED":
+            await websocket.close(code=4401)
         raise

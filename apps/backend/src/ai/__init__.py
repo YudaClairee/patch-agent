@@ -1,3 +1,3 @@
-from .agent import run_agent_stream
+from .agent import run_agent
 
-__all__ = ["run_agent_stream"]
+__all__ = ["run_agent"]

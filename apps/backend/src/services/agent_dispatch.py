@@ -13,7 +13,7 @@ def enqueue_agent_run(agent_run_id: uuid.UUID) -> None:
     retried once Stream 3 is integrated.
     """
     try:
-        from src.tasks.agent import dispatch_agent_run  # noqa: PLC0415
+        from src.services.agent_runner import dispatch_agent_run  # noqa: PLC0415
 
         dispatch_agent_run.delay(str(agent_run_id))
         logger.info("Enqueued dispatch_agent_run for agent run %s.", agent_run_id)

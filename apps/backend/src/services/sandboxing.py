@@ -12,10 +12,9 @@ def get_sandbox_options(agent_run_id: str) -> dict:
         "tmpfs": {
             "/tmp": "rw,exec,nosuid,nodev,size=512m",
             "/workspace": "rw,exec,nosuid,nodev,size=5g",
-            # rag_tools uses PersistentClient at /app/.data/chromadb (resolved from WORKDIR)
-            "/app/.data": "rw,size=2g",
         },
         "network": f"patch_{agent_run_id}",
+        "extra_hosts": {"host.docker.internal": "host-gateway"},
         "detach": True,
         "remove": False,
     }

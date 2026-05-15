@@ -123,41 +123,6 @@ def test_disconnect_repo_raises_for_non_owner(
         )
 
 
-@patch("src.services.repositories._delete_chroma_collection_by_name")
-def test_disconnect_repo_cascades_codebase_index(
-    mock_delete_chroma: MagicMock,
-    session: MagicMock,
-):
-    from src.services.repositories import disconnect_repo
-
-    user_id = UUID("550e8400-e29b-41d4-a716-446655440000")
-
-    repo_id = uuid.uuid4()
-
-    mock_repo = MagicMock()
-    mock_repo.user_id = user_id
-
-    mock_idx = MagicMock()
-    mock_idx.chroma_collection_name = "test_collection_123"
-
-    session.get.return_value = mock_repo
-    session.exec.return_value.all.return_value = [mock_idx]
-
-    disconnect_repo(
-        user_id=user_id,
-        repository_id=repo_id,
-        session=session,
-    )
-
-    mock_delete_chroma.assert_called_once_with(
-        "test_collection_123",
-    )
-
-    assert session.delete.call_count == 2
-
-    session.commit.assert_called_once()
-
-
 @patch("src.services.repositories.select")
 @patch("src.services.repositories.Github")
 def test_connect_repo_returns_existing_on_duplicate(

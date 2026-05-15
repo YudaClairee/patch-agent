@@ -1,9 +1,7 @@
 from src.models.agent_run import AgentRun
 from src.models.agent_run_event import AgentRunEvent
-from src.models.codebase_index import CodebaseIndex
 from src.models.enums import (
     EventType,
-    IndexStatus,
     PRState,
     RunStatus,
     ToolCallStatus,
@@ -19,10 +17,8 @@ from src.models.user import User
 __all__ = [
     "AgentRun",
     "AgentRunEvent",
-    "CodebaseIndex",
     "EventType",
     "GithubCredential",
-    "IndexStatus",
     "PRState",
     "PullRequest",
     "Repository",

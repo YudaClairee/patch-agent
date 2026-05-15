@@ -8,7 +8,7 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./.data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
       interval: 10s
@@ -22,30 +22,13 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - valkey_data:/data
+      - ./.data/valkey:/data
     healthcheck:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
-    restart: unless-stopped
-
-  chroma:
-    image: chromadb/chroma:0.5.23
-    ports:
-      - "8001:8000"
-    volumes:
-      - .data/chromadb:/chroma/chroma
-    environment:
-      IS_PERSISTENT: "TRUE"
-      ANONYMIZED_TELEMETRY: "FALSE"
-    healthcheck:
-        test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-        interval: 10s
-        timeout: 5s
-        retries: 5
-        start_period: 10s
     restart: unless-stopped
 
   backend:
@@ -55,44 +38,19 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URL: redis://valkey:6379/0
-      CHROMA_HOST: chroma
-      CHROMA_PORT: 8000
     env_file:
       - ./apps/backend/.env
     depends_on:
       postgres:
         condition: service_healthy
       valkey:
-        condition: service_healthy
-      chroma:
-        condition: service_healthy
-    restart: unless-stopped
-
-  worker:
-    build: ./apps/backend
-    command: "uv run celery -A src.celery_app worker --loglevel=info --queues=indexing"
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
-      REDIS_URL: redis://valkey:6379/0
-      CHROMA_HOST: chroma
-      CHROMA_PORT: 8000
-    env_file:
-      - ./apps/backend/.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      valkey:
-        condition: service_healthy
-      chroma:
         condition: service_healthy
     restart: unless-stopped
 
   # Celery worker — dispatches agent containers via the host Docker socket.
-  # Docker socket mount is used (simpler than DinD for MVP).
-  # The worker spawns patch/agent containers; it does NOT run the agent itself.
   celery_worker:
     build: ./apps/backend
-    command: uv run celery -A src.services.agent_runner worker --loglevel=info --concurrency=2
+    command: uv run celery -A src.celery_app worker --loglevel=info --concurrency=2 --queues=celery
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -115,6 +73,3 @@ services:
       - backend
     restart: unless-stopped
 
-volumes:
-  postgres_data:
-  valkey_data:

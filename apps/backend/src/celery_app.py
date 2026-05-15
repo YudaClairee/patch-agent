@@ -8,7 +8,7 @@ celery_app = Celery(
     backend=settings.redis_url,
 )
 
-celery_app.autodiscover_tasks(["src.services.indexing"])
+celery_app.autodiscover_tasks(["src.services.agent_runner"])
 
 celery_app.conf.update(
     task_serializer="json",
@@ -16,7 +16,4 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
-    task_routes={
-        "src.services.indexing.index_repository": {"queue": "indexing"},
-    },
 )

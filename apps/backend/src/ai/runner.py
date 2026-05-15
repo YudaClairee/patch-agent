@@ -4,7 +4,6 @@ Reads env vars, clones the repo, runs the agent loop, persists events and tool c
 publishes every event to Redis, and exits with code 0 on success or 1 on failure.
 """
 import asyncio
-import json
 import os
 import subprocess
 import sys
@@ -13,13 +12,12 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session
 
+from src.ai.agent import run_agent
+from src.core.config import settings
 from src.core.database import engine
 from src.models.agent_run import AgentRun
-from src.models.agent_run_event import AgentRunEvent
-from src.models.tool_call import ToolCall
-from src.models.enums import EventType, RunStatus, ToolCallStatus
-from src.services.events import publish_event
-from src.ai.agent import run_agent_stream, SYSTEM_PROMPT
+from src.models.enums import RunStatus
+from src.services.events import RunEmitter, publish_error, publish_status_change
 
 WORKSPACE = "/workspace"
 
@@ -40,61 +38,10 @@ def _set_run_status(agent_run_id: uuid.UUID, status: RunStatus, **kwargs) -> Non
         session.commit()
 
 
-def _append_event(
-    agent_run_id: uuid.UUID,
-    event_type: EventType,
-    payload: dict,
-    sequence: int,
-) -> None:
-    with Session(engine) as session:
-        event = AgentRunEvent(
-            agent_run_id=agent_run_id,
-            sequence=sequence,
-            event_type=event_type,
-            payload=payload,
-        )
-        session.add(event)
-        session.commit()
-
-
-def _upsert_tool_call(
-    agent_run_id: uuid.UUID,
-    sequence: int,
-    tool_name: str,
-    tool_input: dict,
-    status: ToolCallStatus,
-    tool_output: dict | None = None,
-    error_message: str | None = None,
-    duration_ms: int | None = None,
-    started_at: datetime | None = None,
-    finished_at: datetime | None = None,
-) -> uuid.UUID:
-    with Session(engine) as session:
-        tc = ToolCall(
-            agent_run_id=agent_run_id,
-            sequence=sequence,
-            tool_name=tool_name,
-            tool_input=tool_input,
-            status=status,
-            tool_output=tool_output,
-            error_message=error_message,
-            duration_ms=duration_ms,
-            started_at=started_at,
-            finished_at=finished_at,
-        )
-        session.add(tc)
-        session.commit()
-        session.refresh(tc)
-        return tc.id
-
-
 def _clone_repo(repo_clone_url: str, github_token: str) -> None:
-    """Clone the repository into /workspace using an authenticated HTTPS URL."""
     if repo_clone_url.startswith("https://"):
         auth_url = repo_clone_url.replace("https://", f"https://{github_token}@", 1)
     else:
-        # SSH URL — convert to HTTPS with token
-        # git@github.com:owner/repo.git -> https://token@github.com/owner/repo.git
         path = repo_clone_url.split(":")[-1]
         auth_url = f"https://{github_token}@github.com/{path}"
 
@@ -108,7 +55,6 @@ def _clone_repo(repo_clone_url: str, github_token: str) -> None:
 
 
 def _configure_git_identity() -> None:
-    """Set git user identity for commits inside the container."""
     subprocess.run(
         ["git", "config", "user.email", "patch@patch.ai"],
         cwd=WORKSPACE, check=True, capture_output=True,
@@ -126,103 +72,6 @@ def _checkout_branch(branch: str) -> None:
     )
 
 
-def _parse_tool_call_args(raw: str | dict) -> dict:
-    if isinstance(raw, dict):
-        return raw
-    try:
-        return json.loads(raw)
-    except Exception:
-        return {"raw": str(raw)}
-
-
-async def _run_agent(
-    agent_run_id: uuid.UUID,
-    instruction: str,
-    repository_id: str,
-    branch: str,
-    follow_up_context: str | None,
-) -> tuple[int, int]:
-    """
-    Stream agent events, persist to DB, publish to Redis.
-    Returns (total_tool_calls, total_tokens).
-    """
-    sequence = 0
-    total_tool_calls = 0
-    # Maps tool_call sequence -> started_at for duration tracking
-    pending_calls: dict[int, tuple[str, dict, datetime]] = {}
-
-    async for raw_event in run_agent_stream(
-        instruction=instruction,
-        workspace_path=WORKSPACE,
-        repository_id=repository_id,
-        branch=branch,
-        agent_run_id=str(agent_run_id),
-        follow_up_context=follow_up_context,
-    ):
-        # raw_event is an SSE-formatted string: "data: {...}\n\n"
-        if not raw_event.startswith("data:"):
-            continue
-
-        try:
-            payload = json.loads(raw_event.removeprefix("data:").strip())
-        except json.JSONDecodeError:
-            continue
-
-        event_type_str = payload.get("type", "")
-        publish_event(str(agent_run_id), payload)
-
-        if event_type_str == "text_delta":
-            _append_event(agent_run_id, EventType.message, payload, sequence)
-            sequence += 1
-
-        elif event_type_str == "tool_call":
-            tool_name = payload.get("tool_name", "")
-            tool_input = _parse_tool_call_args(payload.get("tool_input", {}))
-            started = _now()
-            pending_calls[sequence] = (tool_name, tool_input, started)
-
-            _append_event(agent_run_id, EventType.tool_call, payload, sequence)
-            _upsert_tool_call(
-                agent_run_id=agent_run_id,
-                sequence=sequence,
-                tool_name=tool_name,
-                tool_input=tool_input,
-                status=ToolCallStatus.success,  # optimistically success; tool errors bubble as agent errors
-                started_at=started,
-                finished_at=_now(),
-            )
-            total_tool_calls += 1
-            sequence += 1
-
-        elif event_type_str == "tool_result":
-            tool_name = payload.get("tool_name", "")
-            tool_output = payload.get("tool_output", {})
-            tool_status_str = payload.get("status", "success")
-            tool_status = ToolCallStatus.success if tool_status_str == "success" else ToolCallStatus.error
-
-            _append_event(agent_run_id, EventType.tool_result, payload, sequence)
-            _upsert_tool_call(
-                agent_run_id=agent_run_id,
-                sequence=sequence,
-                tool_name=tool_name,
-                tool_input={},
-                status=tool_status,
-                tool_output=tool_output if isinstance(tool_output, dict) else {"result": str(tool_output)},
-                finished_at=_now(),
-            )
-            sequence += 1
-
-        elif event_type_str == "error":
-            _append_event(agent_run_id, EventType.error, payload, sequence)
-            sequence += 1
-
-        elif event_type_str == "done":
-            _append_event(agent_run_id, EventType.summary, payload, sequence)
-            sequence += 1
-
-    return total_tool_calls, 0  # token counting from OpenRouter headers — future work
-
-
 async def main() -> None:
     agent_run_id_str = os.environ["AGENT_RUN_ID"]
     instruction = os.environ["INSTRUCTION"]
@@ -236,7 +85,6 @@ async def main() -> None:
 
     agent_run_id = uuid.UUID(agent_run_id_str)
 
-    # Build follow-up context prompt if this is a follow-up run
     follow_up_context: str | None = None
     if parent_run_id and follow_up_instruction:
         with Session(engine) as session:
@@ -251,50 +99,68 @@ async def main() -> None:
     else:
         effective_instruction = instruction
 
-    # Mark as running
+    # Live-only status frames use negative sequences so they don't collide
+    # with the RunEmitter's per-event counter.
+    live_seq = -1
+
+    def _publish_status(new_status: str) -> None:
+        nonlocal live_seq
+        publish_status_change(agent_run_id_str, new_status, live_seq)
+        live_seq -= 1
+
+    def _publish_error_live(message: str) -> None:
+        nonlocal live_seq
+        publish_error(agent_run_id_str, message, live_seq)
+        live_seq -= 1
+
     _set_run_status(agent_run_id, RunStatus.running, started_at=_now())
-    publish_event(agent_run_id_str, {"type": "status_change", "status": "running"})
+    _publish_status("running")
+
+    emitter = RunEmitter(
+        agent_run_id,
+        max_steps=settings.agent_max_steps,
+        duplicate_streak_limit=settings.agent_duplicate_streak_limit,
+    )
 
     try:
-        # Clone and set up workspace
-        publish_event(agent_run_id_str, {"type": "status_change", "status": "cloning_repo"})
+        _publish_status("cloning_repo")
         _clone_repo(repo_clone_url, github_token)
         _configure_git_identity()
 
-        # Checkout branch
         branch_to_checkout = head_branch if head_branch else base_branch
         _checkout_branch(branch_to_checkout)
 
-        # Run agent
-        publish_event(agent_run_id_str, {"type": "status_change", "status": "executing"})
-        total_tool_calls, total_tokens = await _run_agent(
-            agent_run_id=agent_run_id,
+        _publish_status("executing")
+        await run_agent(
+            emitter=emitter,
             instruction=effective_instruction,
+            workspace_path=WORKSPACE,
             repository_id=repository_id,
             branch=branch_to_checkout,
+            agent_run_id=agent_run_id_str,
             follow_up_context=follow_up_context,
         )
 
-        # Finalize success
         _set_run_status(
             agent_run_id,
             RunStatus.succeeded,
             finished_at=_now(),
-            total_tool_calls=total_tool_calls,
-            total_tokens=total_tokens if total_tokens else None,
+            total_tool_calls=emitter.total_tool_calls,
         )
-        publish_event(agent_run_id_str, {"type": "status_change", "status": "succeeded"})
+        _publish_status("succeeded")
 
     except subprocess.CalledProcessError as e:
         error_msg = f"Git command failed: {e.stderr or str(e)}"
         _set_run_status(agent_run_id, RunStatus.failed, finished_at=_now(), error_message=error_msg)
-        publish_event(agent_run_id_str, {"type": "error", "error": error_msg})
+        _publish_error_live(error_msg)
+        _publish_status("failed")
         sys.exit(1)
 
     except Exception as e:
         error_msg = str(e)
         _set_run_status(agent_run_id, RunStatus.failed, finished_at=_now(), error_message=error_msg)
-        publish_event(agent_run_id_str, {"type": "error", "error": error_msg})
+        _publish_error_live(error_msg)
+        _publish_status("failed")
         sys.exit(1)
 
 

@@ -7,7 +7,6 @@ from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
-    from src.models.codebase_index import CodebaseIndex
     from src.models.pull_request import PullRequest
     from src.models.task import Task
     from src.models.user import User
@@ -52,9 +51,5 @@ class Repository(SQLModel, table=True):
     )
 
     user: "User" = Relationship(back_populates="repositories")
-    codebase_indexes: list["CodebaseIndex"] = Relationship(
-        back_populates="repository",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
-    )
     tasks: list["Task"] = Relationship(back_populates="repository")
     pull_requests: list["PullRequest"] = Relationship(back_populates="repository")

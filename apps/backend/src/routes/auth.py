@@ -9,18 +9,13 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from src.core.auth import current_user
 from src.core.config import settings
 from src.core.database import get_session
-from src.core.security import (
-    create_session_token,
-    encrypt_github_token,
-    hash_password,
-    verify_password,
-)
+from src.core.security import create_session_token, encrypt_github_token, hash_password
 from src.models.github_credential import GithubCredential
 from src.models.user import User
 from src.schemas.user import UserRead
@@ -34,18 +29,8 @@ _OAUTH_STATE_COOKIE = "patch_oauth_state"
 _GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 _GITHUB_USER_URL = "https://api.github.com/user"
-_GITHUB_SCOPES = "repo read:user"
-
-
-class SignupBody(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=8, max_length=256)
-    name: str | None = Field(default=None, max_length=255)
-
-
-class LoginBody(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=1, max_length=256)
+_GITHUB_USER_EMAILS_URL = "https://api.github.com/user/emails"
+_GITHUB_SCOPES = "repo read:user user:email"
 
 
 def _is_production() -> bool:
@@ -74,45 +59,6 @@ def _clear_session_cookie(response: Response) -> None:
     )
 
 
-@auth_router.post("/signup", response_model=UserRead)
-def signup(
-    body: SignupBody,
-    response: Response,
-    session: Session = Depends(get_session),
-) -> UserRead:
-    existing = session.exec(select(User).where(User.email == body.email)).first()
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-
-    user = User(
-        email=body.email,
-        name=body.name,
-        hashed_password=hash_password(body.password),
-    )
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-
-    token = create_session_token(user.id)
-    _set_session_cookie(response, token)
-    return UserRead.model_validate(user)
-
-
-@auth_router.post("/login", response_model=UserRead)
-def login(
-    body: LoginBody,
-    response: Response,
-    session: Session = Depends(get_session),
-) -> UserRead:
-    user = session.exec(select(User).where(User.email == body.email)).first()
-    if user is None or not verify_password(body.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
-
-    token = create_session_token(user.id)
-    _set_session_cookie(response, token)
-    return UserRead.model_validate(user)
-
-
 @auth_router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(response: Response) -> Response:
     _clear_session_cookie(response)
@@ -125,15 +71,12 @@ def get_me(user: User = Depends(current_user)) -> UserRead:
 
 
 # ---------------------------------------------------------------------------
-# GitHub OAuth
+# GitHub OAuth (also serves as login/signup)
 # ---------------------------------------------------------------------------
 
 
 @auth_router.get("/github/start")
-def github_start(
-    request: Request,
-    user: User = Depends(current_user),
-) -> RedirectResponse:
+def github_start(request: Request) -> RedirectResponse:
     if not settings.github_oauth_client_id or not settings.github_oauth_client_secret:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -146,7 +89,6 @@ def github_start(
         "redirect_uri": settings.github_oauth_redirect_uri,
         "scope": _GITHUB_SCOPES,
         "state": state,
-        "allow_signup": "false",
     }
     redirect = RedirectResponse(f"{_GITHUB_AUTHORIZE_URL}?{urlencode(params)}", status_code=302)
     redirect.set_cookie(
@@ -161,6 +103,12 @@ def github_start(
     return redirect
 
 
+def _login_error_redirect(reason: str) -> RedirectResponse:
+    response = RedirectResponse(f"{settings.frontend_url}/login?error={reason}", status_code=302)
+    response.delete_cookie(_OAUTH_STATE_COOKIE, path="/auth/github")
+    return response
+
+
 @auth_router.get("/github/callback")
 async def github_callback(
     request: Request,
@@ -168,16 +116,15 @@ async def github_callback(
     state: str | None = None,
     error: str | None = None,
     session: Session = Depends(get_session),
-    user: User = Depends(current_user),
 ) -> RedirectResponse:
     if error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"GitHub error: {error}")
+        return _login_error_redirect("github_denied")
     if not code or not state:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing code/state")
+        return _login_error_redirect("missing_code")
 
     expected_state = request.cookies.get(_OAUTH_STATE_COOKIE)
     if not expected_state or not secrets.compare_digest(expected_state, state):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+        return _login_error_redirect("invalid_state")
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         token_resp = await client.post(
@@ -192,26 +139,49 @@ async def github_callback(
         )
         if token_resp.status_code != 200:
             logger.warning("GitHub token exchange failed: %s %s", token_resp.status_code, token_resp.text)
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub token exchange failed")
+            return _login_error_redirect("token_exchange_failed")
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
         scopes = token_data.get("scope", "")
         if not access_token:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"GitHub returned no access token: {token_data.get('error_description', 'unknown')}",
-            )
+            logger.warning("GitHub returned no access token: %s", token_data)
+            return _login_error_redirect("no_access_token")
 
-        user_resp = await client.get(
-            _GITHUB_USER_URL,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/vnd.github+json",
-            },
-        )
+        gh_headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json",
+        }
+
+        user_resp = await client.get(_GITHUB_USER_URL, headers=gh_headers)
         if user_resp.status_code != 200:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GitHub /user call failed")
-        github_username = user_resp.json().get("login") or "unknown"
+            return _login_error_redirect("github_user_failed")
+        user_data = user_resp.json()
+        github_username = user_data.get("login") or "unknown"
+        github_name = user_data.get("name") or github_username
+
+        emails_resp = await client.get(_GITHUB_USER_EMAILS_URL, headers=gh_headers)
+        if emails_resp.status_code != 200:
+            return _login_error_redirect("github_emails_failed")
+        emails = emails_resp.json() or []
+
+    primary_email: str | None = None
+    for entry in emails:
+        if isinstance(entry, dict) and entry.get("primary") and entry.get("verified"):
+            primary_email = entry.get("email")
+            break
+    if not primary_email:
+        return _login_error_redirect("no_verified_email")
+
+    user = session.exec(select(User).where(User.email == primary_email)).first()
+    if user is None:
+        user = User(
+            email=primary_email,
+            name=github_name,
+            hashed_password=hash_password(secrets.token_urlsafe(32)),
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
 
     now = datetime.now(timezone.utc)
     existing = session.exec(
@@ -233,7 +203,8 @@ async def github_callback(
     session.add(new_cred)
     session.commit()
 
-    response = RedirectResponse(f"{settings.frontend_url}/dashboard?github_connected=1", status_code=302)
+    response = RedirectResponse(f"{settings.frontend_url}/", status_code=302)
+    _set_session_cookie(response, create_session_token(user.id))
     response.delete_cookie(_OAUTH_STATE_COOKIE, path="/auth/github")
     return response
 

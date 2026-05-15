@@ -16,6 +16,7 @@ class PullRequestRead(BaseModel):
     url: str
     state: PRState
     merged_at: datetime | None
+    last_synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

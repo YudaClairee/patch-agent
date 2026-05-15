@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Text, func
+from sqlalchemy import BigInteger, Column, DateTime, Enum as SAEnum, ForeignKey, Text, func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -34,7 +34,10 @@ class PullRequest(SQLModel, table=True):
         )
     )
     github_pr_number: int = Field(nullable=False)
-    github_pr_id: int | None = Field(default=None)
+    # GitHub's global PR id has long exceeded 2^31; must be BIGINT.
+    github_pr_id: int | None = Field(
+        default=None, sa_column=Column(BigInteger, nullable=True)
+    )
     title: str = Field(max_length=512)
     body: str = Field(
         default="", sa_column=Column(Text, nullable=False, server_default="")
@@ -46,6 +49,9 @@ class PullRequest(SQLModel, table=True):
         sa_column=Column(SAEnum(PRState, name="pr_state"), nullable=False)
     )
     merged_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    last_synced_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
     )
 

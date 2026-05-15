@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 
 import docker
-from celery import Celery
 from sqlmodel import Session, select
 
+from src.celery_app import celery_app
 from src.core.config import settings
 from src.core.database import engine
 from src.models.agent_run import AgentRun
@@ -18,16 +18,6 @@ from src.models.github_credential import GithubCredential
 from src.models.enums import RunStatus
 from src.services.credentials import decrypt_token
 from src.services.sandboxing import get_sandbox_options
-
-celery_app = Celery(
-    "patch",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
-)
-celery_app.conf.task_serializer = "json"
-celery_app.conf.result_serializer = "json"
-celery_app.conf.accept_content = ["json"]
-celery_app.conf.timezone = "UTC"
 
 
 def _now() -> datetime:
@@ -89,6 +79,12 @@ def _load_run_context(agent_run_id: uuid.UUID) -> _RunContext:
         )
 
 
+def _for_container(url: str) -> str:
+    # The agent runs on an isolated docker bridge network; rewrite host-loopback
+    # references so it can still reach services published on the host.
+    return url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+
+
 def _build_env(ctx: _RunContext) -> dict[str, str]:
     env = {
         "AGENT_RUN_ID": ctx.agent_run_id,
@@ -97,10 +93,16 @@ def _build_env(ctx: _RunContext) -> dict[str, str]:
         "BASE_BRANCH": ctx.base_branch,
         "GITHUB_TOKEN": ctx.github_token,
         "REPOSITORY_ID": ctx.repository_id,
-        "DATABASE_URL": settings.database_url,
-        "REDIS_URL": settings.redis_url,
-        "OPENROUTER_API_KEY": settings.openrouter_api_key,
-        "OPENROUTER_BASE_URL": settings.openrouter_base_url,
+        "DATABASE_URL": _for_container(settings.database_url),
+        "REDIS_URL": _for_container(settings.redis_url),
+        "LLM_MODEL_ID": settings.llm_model_id,
+        "LLM_API_KEY": settings.llm_api_key,
+        "LLM_BASE_URL": settings.llm_base_url,
+        # LiteLLM reads provider-prefixed env vars from the model id (e.g. openai/...)
+        # so mirror our key into the canonical env vars for the common providers.
+        "OPENAI_API_KEY": settings.llm_api_key,
+        "ANTHROPIC_API_KEY": settings.llm_api_key,
+        "OPENROUTER_API_KEY": settings.llm_api_key,
         "LANGFUSE_PUBLIC_KEY": settings.langfuse_public_key,
         "LANGFUSE_SECRET_KEY": settings.langfuse_secret_key,
         "LANGFUSE_HOST": settings.langfuse_host,
@@ -155,14 +157,36 @@ def dispatch_agent_run(self, agent_run_id: str) -> None:
         exit_code = result.get("StatusCode", -1)
 
         # If the container exited non-zero and the runner didn't already set a terminal status,
-        # finalize the failure here so the row is never left in `running`.
+        # finalize the failure here so the row is never left in `queued` or `running`.
         if exit_code != 0:
+            try:
+                logs_tail = container.logs(tail=80).decode("utf-8", errors="replace")
+            except Exception:
+                logs_tail = ""
             with Session(engine) as session:
                 run_row = session.get(AgentRun, run_uuid)
-                if run_row and run_row.status == RunStatus.running:
+                if run_row and run_row.status in (RunStatus.queued, RunStatus.running):
                     run_row.status = RunStatus.failed
                     run_row.finished_at = _now()
-                    run_row.error_message = f"Container exited with code {exit_code}"
+                    run_row.error_message = (
+                        f"Container exited with code {exit_code}\n--- container logs (last 80 lines) ---\n{logs_tail}"
+                    )[:8000]
+                    session.add(run_row)
+                    session.commit()
+        else:
+            # Container exited 0 but the runner never advanced past `queued` — also a silent crash.
+            with Session(engine) as session:
+                run_row = session.get(AgentRun, run_uuid)
+                if run_row and run_row.status == RunStatus.queued:
+                    try:
+                        logs_tail = container.logs(tail=80).decode("utf-8", errors="replace")
+                    except Exception:
+                        logs_tail = ""
+                    run_row.status = RunStatus.failed
+                    run_row.finished_at = _now()
+                    run_row.error_message = (
+                        f"Container exited 0 but never started the run.\n--- container logs (last 80 lines) ---\n{logs_tail}"
+                    )[:8000]
                     session.add(run_row)
                     session.commit()
 

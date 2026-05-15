@@ -8,7 +8,7 @@ Strategy:
 - Verify: container.run called, container.wait called, container.remove called in finally.
 """
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import pytest
 
 from src.services.agent_runner import _RunContext, dispatch_agent_run

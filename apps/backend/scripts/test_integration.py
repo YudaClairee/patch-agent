@@ -12,7 +12,6 @@ import asyncio
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
 from sqlmodel import Session, select

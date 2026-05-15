@@ -12,6 +12,30 @@ from src.models.task import Task
 from src.schemas.task import TaskCreate
 
 
+def list_agent_runs_for_user(
+    session: Session,
+    user_id: uuid.UUID,
+    limit: int = 50,
+    repository_id: uuid.UUID | None = None,
+) -> list[AgentRun]:
+    if limit > 100:
+        limit = 100
+    statement = (
+        select(AgentRun)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(Task.user_id == user_id)
+        .options(
+            selectinload(AgentRun.pull_request),
+            selectinload(AgentRun.task),
+        )
+        .order_by(AgentRun.queued_at.desc())
+        .limit(limit)
+    )
+    if repository_id is not None:
+        statement = statement.where(Task.repository_id == repository_id)
+    return list(session.exec(statement).all())
+
+
 def get_agent_run_for_user(
     session: Session, run_id: uuid.UUID, user_id: uuid.UUID
 ) -> AgentRun | None:
@@ -33,6 +57,7 @@ def get_agent_run_detail_for_user(
         .options(
             selectinload(AgentRun.tool_calls),
             selectinload(AgentRun.pull_request),
+            selectinload(AgentRun.task),
         )
     )
     return session.exec(statement).first()
@@ -119,6 +144,7 @@ def get_agent_run(session: Session, run_id: uuid.UUID) -> AgentRun | None:
         .options(
             selectinload(AgentRun.tool_calls),
             selectinload(AgentRun.pull_request),
+            selectinload(AgentRun.task),
         )
     )
     return session.exec(statement).first()
