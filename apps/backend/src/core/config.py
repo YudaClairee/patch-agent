@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     agent_duplicate_streak_limit: int = 3
     agent_max_tool_output_chars: int = 4000
 
+    # --- Auto-Review settings ---
+    # Model used for the reviewer LLM call. Defaults to the main model if blank.
+    llm_reviewer_model_id: str = ""
+    # Set to False to disable automatic post-PR review for every developer run.
+    auto_review_enabled: bool = True
+
 
 settings = Settings()
 

@@ -12,12 +12,14 @@ import {
   type EventType,
   type FeedbackCreate,
   patchApi,
+  type ReviewFinding,
+  type ReviewRunRead,
   type TerminalWebSocketFrame,
 } from "../lib/api";
-import { useAgentRun, useAgentRunDiff, useAgentRunEvents, useAgentRunPullRequest } from "../lib/queries";
+import { useAgentRun, useAgentRunDiff, useAgentRunEvents, useAgentRunPullRequest, useAgentRunReview } from "../lib/queries";
 import { useAgentRunStream } from "../lib/ws";
 
-type TabId = "stream" | "diff" | "pr";
+type TabId = "stream" | "diff" | "pr" | "review";
 
 type TimelineEvent = {
   key: string;
@@ -35,6 +37,8 @@ export function RunDetail({ runId }: { runId: string }) {
   const eventsQuery = useAgentRunEvents(runId, 100);
   const diffQuery = useAgentRunDiff(runId);
   const prQuery = useAgentRunPullRequest(runId);
+  const hasReviewerRunId = Boolean(agentRunQuery.data?.reviewer_run_id);
+  const reviewQuery = useAgentRunReview(runId, hasReviewerRunId);
 
   const handleTerminal = useCallback(
     (_: TerminalWebSocketFrame) => {
@@ -162,6 +166,7 @@ export function RunDetail({ runId }: { runId: string }) {
           { id: "stream", label: "stream" },
           { id: "diff", label: "diff" },
           { id: "pr", label: "pr" },
+          ...(hasReviewerRunId ? [{ id: "review", label: "review" }] : []),
         ]}
         active={activeTab}
         onChange={(id) => setActiveTab(id as TabId)}
@@ -179,6 +184,14 @@ export function RunDetail({ runId }: { runId: string }) {
         />
       )}
       {activeTab === "pr" && <PrTab pr={prQuery.data ?? agentRunQuery.data?.pull_request ?? null} />}
+      {activeTab === "review" && (
+        <ReviewTab
+          review={reviewQuery.data ?? null}
+          isLoading={reviewQuery.isLoading}
+          isError={reviewQuery.isError}
+          onNavigateToFix={(fixRunId) => void navigate({ to: "/run/$id", params: { id: fixRunId } })}
+        />
+      )}
     </Shell>
   );
 }
@@ -482,6 +495,123 @@ function PrTab({
       )}
     </div>
   );
+}
+
+function ReviewTab({
+  review,
+  isLoading,
+  isError,
+  onNavigateToFix,
+}: {
+  review: ReviewRunRead | null;
+  isLoading: boolean;
+  isError: boolean;
+  onNavigateToFix: (fixRunId: string) => void;
+}) {
+  if (isLoading) return <p className="text-xs text-[var(--patch-dim)]">running review...</p>;
+  if (isError) return <p className="text-xs text-[var(--patch-error)]">review unavailable.</p>;
+  if (!review) return <p className="text-xs text-[var(--patch-dim)]">no review yet.</p>;
+
+  const { findings, status, fix_run_id } = review;
+  const isReviewRunning = status === "queued" || status === "running";
+
+  const bySeverity = (s: string) => findings.filter((f) => f.severity === s);
+  const critical = bySeverity("critical");
+  const high = bySeverity("high");
+  const medium = bySeverity("medium");
+  const low = bySeverity("low");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 text-xs">
+        <span className="text-[var(--patch-dim)]">auto-review</span>
+        <span
+          className={
+            status === "succeeded"
+              ? "text-[var(--patch-accent)]"
+              : status === "failed"
+                ? "text-[var(--patch-error)]"
+                : "text-[var(--patch-warn)]"
+          }
+        >
+          {status}
+        </span>
+        {isReviewRunning && (
+          <span className="text-[var(--patch-dim)]">~ analysing diff...</span>
+        )}
+      </div>
+
+      {findings.length === 0 && !isReviewRunning && (
+        <p className="text-xs text-[var(--patch-accent)]">~ no issues found. PR looks good.</p>
+      )}
+
+      {([["critical", critical], ["high", high], ["medium", medium], ["low", low]] as [string, ReviewFinding[]][])
+        .filter(([, items]) => items.length > 0)
+        .map(([severity, items]) => (
+          <div key={severity}>
+            <div className={`mb-2 text-xs font-semibold uppercase tracking-wide ${severityClass(severity)}`}>
+              {severity} ({items.length})
+            </div>
+            <div className="space-y-2">
+              {items.map((finding, idx) => (
+                <FindingCard key={`${severity}-${idx}`} finding={finding} />
+              ))}
+            </div>
+          </div>
+        ))}
+
+      {fix_run_id && (
+        <div className="border border-[var(--patch-border)] bg-[var(--patch-surface)] p-3 text-xs">
+          <div className="mb-1 text-[var(--patch-warn)]">auto-fix triggered</div>
+          <button
+            type="button"
+            onClick={() => onNavigateToFix(fix_run_id)}
+            className="text-[var(--patch-accent)] hover:underline"
+          >
+            [ view fix run → ]
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FindingCard({ finding }: { finding: ReviewFinding }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="border border-[var(--patch-border)] bg-[var(--patch-surface)] text-xs">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-baseline gap-2 px-3 py-2 text-left"
+      >
+        <span className={`shrink-0 font-semibold ${severityClass(finding.severity)}`}>
+          [{finding.severity.toUpperCase()}]
+        </span>
+        <span className="truncate text-[var(--patch-dim)]">{finding.file_path}</span>
+        <span className="ml-auto shrink-0 text-[var(--patch-dim)]">{expanded ? "▲" : "▼"}</span>
+      </button>
+      <div className="border-t border-[var(--patch-border)] px-3 py-2">
+        <p>{finding.issue}</p>
+        {expanded && (
+          <div className="mt-2 space-y-1">
+            <div className="text-[var(--patch-dim)]">
+              category <span className="text-[var(--patch-fg)]">{finding.category}</span>
+            </div>
+            <div className="text-[var(--patch-dim)]">suggestion</div>
+            <p className="whitespace-pre-wrap pl-2 text-[var(--patch-accent)]">{finding.suggestion}</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function severityClass(severity: string) {
+  if (severity === "critical") return "text-[var(--patch-error)]";
+  if (severity === "high") return "text-[var(--patch-warn)]";
+  if (severity === "medium") return "text-[var(--patch-fg)]";
+  return "text-[var(--patch-dim)]";
 }
 
 const STATUS_RANK: Record<string, number> = {

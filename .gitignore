@@ -4,6 +4,7 @@
 .moon/docker
 
 .env
+.env.local
 .venv
 
 .node-modules

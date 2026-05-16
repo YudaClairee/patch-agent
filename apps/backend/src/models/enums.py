@@ -9,6 +9,12 @@ class RunStatus(str, Enum):
     cancelled = "cancelled"
 
 
+class RunRole(str, Enum):
+    developer = "developer"
+    reviewer = "reviewer"
+    fixer = "fixer"
+
+
 class EventType(str, Enum):
     status_change = "status_change"
     plan = "plan"
@@ -17,6 +23,7 @@ class EventType(str, Enum):
     tool_result = "tool_result"
     error = "error"
     summary = "summary"
+    review_finding = "review_finding"
 
 
 class ToolCallStatus(str, Enum):

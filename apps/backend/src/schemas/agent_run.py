@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, field_serializer, model_validator
-from src.models.enums import PRState, RunStatus
+from src.models.enums import PRState, RunRole, RunStatus
 from src.schemas.tool_call import ToolCallRead
 from src.schemas.pull_request import PullRequestRead
 
@@ -33,6 +33,7 @@ class AgentRunListItemRead(BaseModel):
     task_id: uuid.UUID
     instruction: str | None = None
     status: RunStatus
+    run_role: RunRole = RunRole.developer
     branch_name: str | None
     queued_at: datetime
     started_at: datetime | None
@@ -55,7 +56,9 @@ class AgentRunRead(BaseModel):
     task_id: uuid.UUID
     instruction: str | None = None
     status: RunStatus
+    run_role: RunRole = RunRole.developer
     parent_run_id: uuid.UUID | None
+    reviewer_run_id: uuid.UUID | None = None
     follow_up_instruction: str | None
     branch_name: str | None
     model_id: str

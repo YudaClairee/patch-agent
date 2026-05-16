@@ -78,3 +78,18 @@ export function useAgentRunDiff(id: string | undefined) {
     retry: false,
   });
 }
+
+export function useAgentRunReview(id: string | undefined, hasReviewerRunId: boolean) {
+  return useQuery({
+    queryKey: ["patch", id ? apiEndpoints.agentRunReview(id) : "agent-run-review:missing"],
+    queryFn: () => patchApi.getAgentRunReview(id ?? ""),
+    enabled: Boolean(id) && hasReviewerRunId,
+    retry: false,
+    // Poll while review is still in-progress
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (!status || TERMINAL_RUN_STATUSES.has(status)) return false;
+      return 3000;
+    },
+  });
+}
