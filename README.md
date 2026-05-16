@@ -1,25 +1,27 @@
 # P.A.T.C.H. Agent
 
-Web-based AI coding agent. Connect a GitHub repository, describe a change in plain English, and watch the agent live-stream its reasoning, run shell commands inside a sandboxed container, edit files via unified diffs, and open a pull request for you.
+Web-based AI coding agent. Connect a GitHub repository, describe a change in plain English, watch the agent run inside a sandboxed container, and receive a pull request.
 
 This repository is a Moonrepo-managed monorepo with:
 
-- **`apps/backend`** — FastAPI + SQLModel API, Celery worker that dispatches agent containers, agno-powered ReAct agent with a Codex-style 4-tool surface (`exec_command`, `write_stdin`, `patch_file`, `submit_pull_request`).
-- **`apps/frontend`** — React + TanStack Start SPA. Repository picker, run history, and a live agent-run screen wired to a WebSocket event stream.
-- **Infra** — PostgreSQL, Valkey (Redis-compatible), and a dedicated Docker image (`patch/agent:latest`) the worker spawns per run.
+- **`apps/backend`** - FastAPI + SQLModel API, Celery worker, GitHub OAuth, PostgreSQL persistence, Valkey event streaming, and an agno/LiteLLM-powered agent.
+- **`apps/frontend`** - React + Vite SPA using TanStack Router, TanStack Query, Tailwind CSS, and a local `@patch/ui` package.
+- **Infra** - PostgreSQL with pgvector, Valkey, and a dedicated Docker image (`patch/agent:latest`) spawned once per agent run.
 
-## 📋 Prerequisites
+For VM deployment, read [deployment.md](deployment.md).
 
-Install these on your machine:
+## Prerequisites
 
-1. **[Git](https://git-scm.com/)**
-2. **[Docker & Docker Compose](https://www.docker.com/)** — runs Postgres, Valkey, and the agent sandbox containers spawned by Celery.
-3. **[Node.js](https://nodejs.org/en)** v20+
-4. **[pnpm](https://pnpm.io/)** — frontend package manager (`npm install -g pnpm`)
-5. **[uv](https://docs.astral.sh/uv/)** — backend Python package manager (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-6. **[Moon](https://moonrepo.dev/docs/install)** — monorepo task runner (`npm install -g @moonrepo/cli`)
+Install these for local development:
 
-## 🚀 Getting Started
+1. [Git](https://git-scm.com/)
+2. [Docker & Docker Compose](https://www.docker.com/) - runs Postgres, Valkey, and agent sandbox containers.
+3. [Node.js](https://nodejs.org/en) 22.x - the Moon toolchain pins `22.12.0`.
+4. [pnpm](https://pnpm.io/) 10.x - the frontend package manager.
+5. [uv](https://docs.astral.sh/uv/) - backend Python package manager.
+6. [Moon](https://moonrepo.dev/docs/install) - monorepo task runner.
+
+## Local Development
 
 ### 1. Clone
 
@@ -28,120 +30,143 @@ git clone git@github.com:Hatvim/patch-agent.git
 cd patch-agent
 ```
 
-### 2. Configure environment
+### 2. Configure Environment
 
 ```bash
 cp apps/backend/.env.example apps/backend/.env
-cp apps/frontend/.env.example apps/frontend/.env   # optional; defaults work for local dev
+cp apps/frontend/.env.example apps/frontend/.env
 ```
 
-You **must** fill in at least:
+At minimum, fill these in `apps/backend/.env`:
 
-- `LLM_MODEL_ID` + `LLM_API_KEY` — any LiteLLM-supported provider works (OpenAI, Anthropic, OpenRouter, Gemini, Groq, …). The `LLM_MODEL_ID` prefix selects the provider; `LLM_BASE_URL` is only needed for proxies like OpenRouter.
-- `FERNET_KEY` — encrypts stored GitHub tokens. Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
-- `JWT_SECRET` — signs session cookies. Generate with `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
-- `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` — create a GitHub OAuth App at <https://github.com/settings/developers> with callback `http://localhost:8000/auth/github/callback`.
-- `LANGFUSE_*` (optional) — enables OpenTelemetry tracing of every LLM call and tool use.
+- `LLM_MODEL_ID` and `LLM_API_KEY` - any LiteLLM-supported provider can work.
+- `FERNET_KEY` - encrypts stored GitHub tokens.
+- `JWT_SECRET` - signs session cookies.
+- `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` - create an OAuth App at <https://github.com/settings/developers>.
+- `GITHUB_OAUTH_REDIRECT_URI` - for local dev, use `http://localhost:8000/auth/github/callback`.
+- `FRONTEND_URL` - for local dev, use `http://localhost:5173`.
+- `CORS_ORIGINS` - include `http://localhost:5173`.
 
-### 3. Start Postgres + Valkey
+Generate local secrets:
+
+```bash
+python3 -c "import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())"
+python3 -c "import secrets; print(secrets.token_urlsafe(64))"
+```
+
+Use the first value for `FERNET_KEY` and the second for `JWT_SECRET`.
+
+### 3. Start Postgres and Valkey
 
 ```bash
 docker compose up -d postgres valkey
 ```
 
-Data persists under `./.data/` (gitignored).
+Data persists under `./.data/`, which is gitignored.
 
-### 4. Build the agent sandbox image
+### 4. Install Dependencies
 
-The Celery worker spawns one `patch/agent:latest` container per agent run. Build it once (and any time `apps/backend/Dockerfile.agent` or backend source changes):
+```bash
+(cd apps/frontend && pnpm install)
+(cd apps/backend && uv sync)
+```
+
+### 5. Run Migrations
+
+```bash
+(cd apps/backend && uv run alembic upgrade head)
+```
+
+### 6. Build the Agent Sandbox Image
+
+The Celery worker spawns one `patch/agent:latest` container per agent run:
 
 ```bash
 docker build -f apps/backend/Dockerfile.agent -t patch/agent:latest apps/backend
 ```
 
-### 5. Install dependencies
+Rebuild it whenever `apps/backend/Dockerfile.agent` or backend agent code changes.
 
-```bash
-pnpm install                  # frontend workspaces
-(cd apps/backend && uv sync)  # backend
-```
+### 7. Start the Dev Stack
 
-### 6. Run database migrations
-
-```bash
-cd apps/backend
-uv run alembic upgrade head
-cd ../..
-```
-
-### 7. Start the dev stack
-
-You need **three** processes running locally. Open three terminals:
-
-**Terminal 1 — API server:**
+Run these in separate terminals:
 
 ```bash
 moon run server:dev
 ```
 
-**Terminal 2 — Celery worker** (dispatches agent containers; needs Docker socket access):
-
 ```bash
-cd apps/backend
-uv run celery -A src.celery_app worker --loglevel=info --concurrency=2 --queues=celery
+(cd apps/backend && uv run celery -A src.celery_app worker --loglevel=info --concurrency=2 --queues=celery)
 ```
-
-**Terminal 3 — Frontend:**
 
 ```bash
 moon run client:dev
 ```
 
-Then open:
+Open:
 
-- Frontend: <http://localhost:3000>
-- Backend API + docs: <http://localhost:8000/docs>
+- Frontend dev server: <http://localhost:5173>
+- Backend health: <http://localhost:8000/health>
+- Backend API reference: <http://localhost:8000/scalar>
 
-### 8. First-run flow
+## Docker Compose
 
-1. Sign up / log in (email + password, or “Continue with GitHub”).
-2. Click **Connect GitHub** to authorize the OAuth app — this stores an encrypted token used to clone repos and open PRs.
-3. Pick a repository, then on the repo detail screen describe the change you want and start a run.
-4. Watch the live event stream; when the agent finishes, follow the PR link.
-
-## 🐳 All-in-one with Docker Compose
-
-If you'd rather run everything in containers (API + worker + frontend + Postgres + Valkey):
+For a containerized local stack:
 
 ```bash
-docker compose up --build
+docker build -f apps/backend/Dockerfile.agent -t patch/agent:latest apps/backend
+docker compose build
+docker compose run --rm backend uv run alembic upgrade head
+docker compose up
 ```
 
-The compose file mounts the host Docker socket into the worker so it can spawn agent containers. Make sure you've built `patch/agent:latest` first (step 4).
+The frontend image uses build-time values for:
 
-## 🛠 Common Development Commands
+- `VITE_API_BASE_URL`
+- `VITE_WS_BASE_URL`
 
-Run from the repo root via Moon:
+For VM deployment, do not rely on localhost defaults. Follow [deployment.md](deployment.md).
 
-### Frontend (React / Biome)
+## First Run Flow
 
-- `moon run client:lint` — lint
-- `moon run client:format` — format
-- `moon run client:typecheck` — TypeScript check
+1. Open the frontend.
+2. Click `continue with github`.
+3. Pick a repository from your GitHub account.
+4. Describe a small change and start a run.
+5. Watch the run stream.
+6. Follow the PR link when the agent finishes.
 
-### Backend (FastAPI / Ruff / Pytest)
+GitHub OAuth is currently the only sign-in method.
 
-- `moon run server:lint` — Ruff lint
-- `moon run server:format` — Ruff format
-- `(cd apps/backend && uv run pytest)` — run tests
+## Common Commands
 
-### Database
+Frontend:
 
-- `(cd apps/backend && uv run alembic revision --autogenerate -m "msg")` — create a migration
-- `(cd apps/backend && uv run alembic upgrade head)` — apply migrations
+```bash
+moon run client:check
+moon run client:typecheck
+moon run client:build
+(cd apps/frontend && pnpm run format)
+```
 
-## 💡 Workflow
+Backend:
 
-1. Branch from `main`: `git checkout -b feature/short-name`.
-2. Make sure lint, typecheck, and tests pass before committing.
-3. Push and open a PR for review.
+```bash
+moon run server:lint
+moon run server:format
+(cd apps/backend && uv run pytest)
+```
+
+Database:
+
+```bash
+(cd apps/backend && uv run alembic revision --autogenerate -m "message")
+(cd apps/backend && uv run alembic upgrade head)
+```
+
+## Operational Notes
+
+- Keep `FERNET_KEY` stable. Changing it makes existing stored GitHub tokens unreadable.
+- `celery_worker` needs Docker socket access so it can spawn sandbox containers.
+- The default compose file publishes Postgres and Valkey ports for local convenience. Protect those ports on a VM.
+- `ENVIRONMENT=production` enables `Secure` cookies, so production login requires HTTPS.

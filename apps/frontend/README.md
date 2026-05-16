@@ -1,61 +1,105 @@
 # P.A.T.C.H. Frontend
 
-React + Vite frontend prototype untuk P.A.T.C.H. Aplikasi ini memakai TanStack Router, TanStack Query, Tailwind CSS, Framer Motion, Lucide React, Biome, pnpm workspace, dan shared UI package lokal `@patch/ui`.
+React + Vite frontend for P.A.T.C.H. It uses TanStack Router, TanStack Query, Tailwind CSS, Biome, pnpm workspaces, and the local shared UI package `@patch/ui`.
 
-Panduan kontrak API backend ada di [api_contract.md](./markdown/api_contract.md). Product requirement ada di [PRD Project P A T C H.md](./markdown/PRD%20Project%20P%20A%20T%20C%20H.md).
+Deployment notes for the full app live in [../../deployment.md](../../deployment.md).
 
 ## Quick Start
 
-Jalankan dari folder `apps/frontend`:
+Run from `apps/frontend`:
 
 ```bash
 pnpm install
 pnpm run dev
 ```
 
-Command umum:
+The Vite dev server defaults to:
+
+```text
+http://localhost:5173
+```
+
+Make sure the backend env allows this origin:
+
+```env
+FRONTEND_URL=http://localhost:5173
+CORS_ORIGINS=http://localhost:5173
+```
+
+## Environment
+
+Copy the example env when running locally:
+
+```bash
+cp .env.example .env
+```
+
+Variables:
+
+```env
+VITE_API_BASE_URL=http://localhost:8000
+VITE_WS_BASE_URL=ws://localhost:8000
+```
+
+These are Vite build-time variables. For Docker/VM deployment, export production values before `docker compose build`:
+
+```bash
+export VITE_API_BASE_URL=https://api.patch.example.com
+export VITE_WS_BASE_URL=wss://api.patch.example.com
+```
+
+## Commands
 
 ```bash
 pnpm run check         # Biome check
-pnpm run typecheck     # TypeScript check untuk @patch/ui dan app
-pnpm run format        # format frontend workspace
-pnpm run build         # production build ke dist/
-pnpm run preview       # preview hasil build
+pnpm run typecheck     # TypeScript check for @patch/ui and app
+pnpm run format        # Format frontend workspace
+pnpm run build         # Production build to dist/
+pnpm run preview       # Preview production build
 pnpm run ci            # check + typecheck + build
+```
+
+Moon equivalents from the repository root:
+
+```bash
+moon run client:dev
+moon run client:check
+moon run client:typecheck
+moon run client:build
 ```
 
 ## Structure
 
 ```text
 apps/frontend/
-  index.html              Vite HTML shell dan #root
-  vite.config.mjs         Vite config aktif
-  package.json            scripts dan dependency frontend
-  pnpm-workspace.yaml     workspace lokal untuk packages/*
+  index.html              Vite HTML shell and #root
+  vite.config.mjs         Vite config
+  package.json            scripts and dependencies
+  pnpm-workspace.yaml     local workspace for packages/*
   biome.json              formatter/linter config
-  moon.yml                Moon project config untuk client
+  nginx.conf              production static file server config
+  Dockerfile              production frontend image
   public/
-    patch.svg             logo aplikasi
-    patchLogo.svg         favicon SVG
+    patch.svg
+    patchLogo.svg
   src/
     index.tsx             React mount
     app.tsx               QueryClientProvider + AppRouter
+    api-contract.ts       frontend-facing API contract helpers/types
     styles.css            Tailwind + @patch/ui styles
-    wireframe-data.ts     mock data, route map, screen metadata
+    lib/
+      api.ts              API client and WebSocket URL creation
+      queries.ts          TanStack Query hooks
+      run-format.ts       run display helpers
+      ws.ts               WebSocket helpers
     routes/
       index.tsx           TanStack Router provider
       route-tree.tsx      route definitions
-      screen-view.tsx     route-to-section bridge
     sections/
       login-page.tsx
-      home-page.tsx
-      app-shell.tsx
-      dashboard.tsx
-      repository-setup.tsx
-      new-task.tsx
-      agent-run.tsx
-      diff-review.tsx
-      pr-result.tsx
+      runs-list.tsx
+      repo-detail.tsx
+      run-detail.tsx
   packages/
     ui/                   shared UI primitives, tokens, utilities
 ```
@@ -63,28 +107,28 @@ apps/frontend/
 ## Routes
 
 ```text
-/           home
-/login      login
-/dashboard  operations dashboard
-/repo       repository setup
-/task       new task
-/run        agent run
-/diff       diff review
-/pr         pull request result
+/                 runs list / home
+/login            GitHub OAuth login
+/repo/$id         repository detail
+/run/$id          agent run detail
 ```
+
+## Production Build
+
+```bash
+pnpm run build
+```
+
+The Docker image builds the static app and serves `dist/` with Nginx on container port `3000`.
+
+For production, the frontend must be built with public backend URLs. If the image was built with localhost values, browser requests from users will try to reach their own machines instead of your VM.
 
 ## Shared UI
 
-Import reusable UI dari package lokal:
+Import reusable UI from the local package:
 
 ```tsx
 import { Badge, Button, Card, SectionHeading } from "@patch/ui";
 ```
 
-Shared package berada di `packages/ui` dan berisi component primitive, token CSS `--patch-*`, `patchClasses`, dan helper `cn()`.
-
-## Notes
-
-- Data UI saat ini masih mock di `src/wireframe-data.ts`.
-- Backend integration contract ada di [api_contract.md](./markdown/api_contract.md).
-- File Vite aktif hanya `vite.config.mjs`; tidak ada generated route tree yang dipakai saat ini.
+The shared package lives in `packages/ui` and includes component primitives, CSS tokens, `patchClasses`, and `cn()`.
