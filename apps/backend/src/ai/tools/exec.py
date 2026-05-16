@@ -46,7 +46,6 @@ _BLOCKED_COMMAND_PATTERNS = (
     re.compile(r"\b(?:chmod|chown)\s+-R\b", re.I),
     re.compile(r"\bgit\s+config\b.*\bcredential\b", re.I | re.S),
     re.compile(r"\b(?:curl|wget)\b.*[|>]\s*(?:sh|bash|zsh|python|perl|ruby)\b", re.I | re.S),
-    re.compile(r"\b(?:npm|pnpm|yarn)\s+(?:i|install|add)\b", re.I),
     re.compile(r"\b(?:pip|pip3)\s+install\b", re.I),
     re.compile(r"\buv\s+(?:add|pip\s+install)\b", re.I),
     re.compile(r"\bpoetry\s+add\b", re.I),
@@ -129,9 +128,111 @@ def _safe_subprocess_env() -> dict[str, str]:
 
 def _tokenize_command(command: str) -> list[str]:
     try:
-        return shlex.split(command, comments=False, posix=True)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        return list(lexer)
     except ValueError:
         return []
+
+
+def _shell_network_enabled() -> bool:
+    return os.environ.get("AGENT_SHELL_NETWORK_ENABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _is_shell_boundary(token: str) -> bool:
+    return bool(token) and all(ch in "();<>|&" for ch in token)
+
+
+def _flag_enabled(args: list[str], flag: str) -> bool:
+    enabled = False
+    negated_flag = f"--no-{flag.removeprefix('--')}"
+
+    for arg in args:
+        if arg == flag:
+            enabled = True
+            continue
+        if arg.startswith(f"{flag}="):
+            value = arg.split("=", 1)[1].lower()
+            enabled = value not in {"0", "false", "no", "off"}
+            continue
+        if arg == negated_flag or arg.startswith(f"{negated_flag}="):
+            enabled = False
+
+    return enabled
+
+
+def _package_manager_invocations(tokens: list[str]) -> list[tuple[str, list[str]]]:
+    invocations: list[tuple[str, list[str]]] = []
+    for index, token in enumerate(tokens):
+        executable = Path(token).name.lower()
+        if executable not in {"npm", "pnpm", "yarn"}:
+            continue
+
+        args: list[str] = []
+        for arg in tokens[index + 1 :]:
+            if _is_shell_boundary(arg):
+                break
+            args.append(arg)
+        invocations.append((executable, args))
+
+    return invocations
+
+
+def _package_install_subcommand(executable: str, args: list[str]) -> str | None:
+    install_subcommands = {
+        "npm": {"add", "ci", "i", "install"},
+        "pnpm": {"add", "i", "install"},
+        "yarn": {"add", "install"},
+    }[executable]
+    first_non_option: str | None = None
+    install_match: str | None = None
+
+    for arg in args:
+        lowered = arg.lower()
+        if lowered in install_subcommands and install_match is None:
+            install_match = lowered
+        if first_non_option is None and not lowered.startswith("-"):
+            first_non_option = lowered
+
+    if first_non_option in install_subcommands:
+        return first_non_option
+    if install_match and first_non_option not in {"run", "run-script"}:
+        return install_match
+    return None
+
+
+def _validate_package_install_policy(command: str, shell_network_enabled: bool) -> None:
+    tokens = _tokenize_command(command)
+    if not tokens:
+        return
+
+    for executable, args in _package_manager_invocations(tokens):
+        if not args:
+            continue
+
+        subcommand = _package_install_subcommand(executable, args)
+        if subcommand is None:
+            continue
+
+        if not shell_network_enabled:
+            raise PermissionError("Dependency installs are blocked by shell network policy.")
+
+        if executable == "npm" and subcommand == "ci":
+            if _flag_enabled(args, "--ignore-scripts"):
+                continue
+            raise PermissionError("npm ci must use --ignore-scripts.")
+
+        if executable == "pnpm" and subcommand == "install":
+            if _flag_enabled(args, "--frozen-lockfile") and _flag_enabled(args, "--ignore-scripts"):
+                continue
+            raise PermissionError("pnpm install must use --frozen-lockfile --ignore-scripts.")
+
+        raise PermissionError("Package install command blocked by shell security policy.")
 
 
 def _validate_command_policy(command: str) -> None:
@@ -140,15 +241,13 @@ def _validate_command_policy(command: str) -> None:
         if pattern.search(command):
             raise PermissionError("Command blocked by path security policy.")
 
+    shell_network_enabled = _shell_network_enabled()
+    _validate_package_install_policy(command, shell_network_enabled)
+
     for pattern in _BLOCKED_COMMAND_PATTERNS:
         if pattern.search(command):
             raise PermissionError("Command blocked by shell security policy.")
 
-    shell_network_enabled = os.environ.get("AGENT_SHELL_NETWORK_ENABLED", "").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
     if not shell_network_enabled:
         network_pattern = re.compile(
             r"(?:^|[;&|()]\s*)(?:"
@@ -688,4 +787,3 @@ def patch_file(path: str, diff: str) -> dict:
 
 
 __all__ = ["exec_command", "write_stdin", "patch_file", "write_file"]
-

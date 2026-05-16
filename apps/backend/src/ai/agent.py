@@ -247,7 +247,9 @@ exec_command arguments. Call mark_blocked(reason) with a concise explanation.
 - NEVER inspect environment variables, /proc/*/environ, .git internals, SSH keys,
   or credential helper configuration.
 - Network-capable shell commands and dependency installs are blocked unless an
-  administrator explicitly enables shell network access for the run.
+  administrator explicitly enables shell network access for the run. Even then,
+  only deterministic Node installs are allowed: `npm ci --ignore-scripts` or
+  `pnpm install --frozen-lockfile --ignore-scripts`.
 - Keep changes minimal and focused. No drive-by refactors.
 - If the task is impossible, ambiguous, or blocked, call mark_blocked(reason).
 - New-file tasks: create the file in a sensible directory under /workspace

@@ -40,12 +40,28 @@ cp apps/frontend/.env.example apps/frontend/.env
 At minimum, fill these in `apps/backend/.env`:
 
 - `LLM_MODEL_ID` and `LLM_API_KEY` - any LiteLLM-supported provider can work.
+- `LLM_BASE_URL` - set this for gateway providers such as OpenRouter.
 - `FERNET_KEY` - encrypts stored GitHub tokens.
 - `JWT_SECRET` - signs session cookies.
 - `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` - create an OAuth App at <https://github.com/settings/developers>.
 - `GITHUB_OAUTH_REDIRECT_URI` - for local dev, use `http://localhost:8000/auth/github/callback`.
 - `FRONTEND_URL` - for local dev, use `http://localhost:5173`.
 - `CORS_ORIGINS` - include `http://localhost:5173`.
+
+`apps/backend/.env.example` also documents optional Langfuse, agent sandbox, and embedding/code-search settings. Keep real secrets only in `.env`; do not commit them.
+
+Agent shell network access is off by default. If you want agent runs to install locked Node dependencies during verification, set:
+
+```env
+AGENT_SHELL_NETWORK_ENABLED=true
+```
+
+Even with shell network enabled, the agent only allows deterministic Node installs:
+
+```bash
+npm ci --ignore-scripts
+pnpm install --frozen-lockfile --ignore-scripts
+```
 
 Generate local secrets:
 
