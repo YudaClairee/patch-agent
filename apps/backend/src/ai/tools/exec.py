@@ -8,9 +8,11 @@ Three primitives that compose to cover every workflow:
 """
 import os
 import pty
+import re
 import select
 import shutil
 import signal
+import shlex
 import subprocess
 import tempfile
 import time
@@ -18,7 +20,53 @@ from pathlib import Path
 
 WORKSPACE = "/workspace"
 _MAX_OUTPUT_BYTES = 64 * 1024  # 64KB cap per call to keep token cost sane
-_BLOCKED_READ_SUFFIXES = (".env", ".pem", ".key")
+_BLOCKED_WRITE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
+_BLOCKED_PATH_PATTERNS = (
+    re.compile(
+        r"(^|[/\s'\"])\.env($|[\s/]|\.local\b|\.production\b|\.development\b|\.test\b|\.staging\b)",
+        re.I,
+    ),
+    re.compile(r"(^|[/\s'\"])\.ssh($|/)"),
+    re.compile(r"(^|[/\s'\"])id_(rsa|dsa|ecdsa|ed25519)(\.pub)?($|[\s'\"])", re.I),
+    re.compile(r"\.(pem|key|p12|pfx)($|[\s'\";|&])", re.I),
+    re.compile(r"(^|[\s'\";|&])\.git($|/|[\s'\";|&])", re.I),
+    re.compile(r"/proc/(self|\d+)/environ\b", re.I),
+)
+_BLOCKED_COMMAND_PATTERNS = (
+    re.compile(r"(^|[\s;&|()])(?:env|printenv)\b", re.I),
+    re.compile(r"(^|[\s;&|()])(?:export|set)\s*(?:$|[;&|])", re.I),
+    re.compile(r"\$\{?[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|DATABASE_URL|REDIS_URL|GITHUB|OPENAI|ANTHROPIC|OPENROUTER|LANGFUSE|FERNET|JWT)[A-Z0-9_]*\}?", re.I),
+    re.compile(r"\brm\s+-(?:[^\s]*r[^\s]*f|[^\s]*f[^\s]*r)\b", re.I),
+    re.compile(r"\b(?:chmod|chown)\s+-R\b", re.I),
+    re.compile(r"\bgit\s+config\b.*\bcredential\b", re.I | re.S),
+    re.compile(r"\b(?:curl|wget)\b.*[|>]\s*(?:sh|bash|zsh|python|perl|ruby)\b", re.I | re.S),
+    re.compile(r"\b(?:npm|pnpm|yarn)\s+(?:i|install|add)\b", re.I),
+    re.compile(r"\b(?:pip|pip3)\s+install\b", re.I),
+    re.compile(r"\buv\s+(?:add|pip\s+install)\b", re.I),
+    re.compile(r"\bpoetry\s+add\b", re.I),
+    re.compile(r"\bcargo\s+install\b", re.I),
+)
+_NETWORK_COMMANDS = (
+    "curl",
+    "wget",
+    "nc",
+    "netcat",
+    "nmap",
+    "ssh",
+    "scp",
+    "sftp",
+    "telnet",
+    "ping",
+    "dig",
+    "nslookup",
+    "host",
+    "ftp",
+    "apt",
+    "apt-get",
+    "apk",
+    "yum",
+    "dnf",
+)
 
 # Background process registry: pid -> {master_fd, proc, buffer}
 _BG: dict[int, dict] = {}
@@ -35,9 +83,75 @@ def _resolve_cwd(cwd: str) -> str:
     return str(p)
 
 
-def _is_blocked_path(target: str) -> bool:
+def _is_blocked_write_path(target: str) -> bool:
     lower = target.lower()
-    return any(lower.endswith(suf) or f"/{suf.lstrip('.')}" in lower for suf in _BLOCKED_READ_SUFFIXES)
+    filename = Path(lower).name
+    if filename == ".env" or (
+        filename.startswith(".env.")
+        and filename not in {".env.example", ".env.sample", ".env.template"}
+    ):
+        return True
+    return any(lower.endswith(suf) for suf in _BLOCKED_WRITE_SUFFIXES)
+
+
+def _safe_subprocess_env() -> dict[str, str]:
+    """Return an intentionally small env for model-controlled shell commands."""
+    safe: dict[str, str] = {
+        "PATH": os.environ.get(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        ),
+        "HOME": "/tmp",
+        "USER": os.environ.get("USER", "patch"),
+        "LOGNAME": os.environ.get("LOGNAME", "patch"),
+        "SHELL": "/bin/bash",
+        "TERM": os.environ.get("TERM", "xterm-256color"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+        "TMPDIR": "/tmp",
+        "CI": "true",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_PAGER": "cat",
+        "PAGER": "cat",
+    }
+    for key in ("NO_COLOR", "FORCE_COLOR"):
+        if key in os.environ:
+            safe[key] = os.environ[key]
+    return safe
+
+
+def _tokenize_command(command: str) -> list[str]:
+    try:
+        return shlex.split(command, comments=False, posix=True)
+    except ValueError:
+        return []
+
+
+def _validate_command_policy(command: str) -> None:
+    """Deny known secret-read, credential, destructive, and network escape patterns."""
+    for pattern in _BLOCKED_PATH_PATTERNS:
+        if pattern.search(command):
+            raise PermissionError("Command blocked by path security policy.")
+
+    for pattern in _BLOCKED_COMMAND_PATTERNS:
+        if pattern.search(command):
+            raise PermissionError("Command blocked by shell security policy.")
+
+    shell_network_enabled = os.environ.get("AGENT_SHELL_NETWORK_ENABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not shell_network_enabled:
+        network_pattern = re.compile(
+            r"(?:^|[;&|()]\s*)(?:"
+            + "|".join(re.escape(command_name) for command_name in _NETWORK_COMMANDS)
+            + r")\b",
+            re.I,
+        )
+        if network_pattern.search(command):
+            raise PermissionError("Network-capable shell commands are blocked by security policy.")
 
 
 def _drain(master_fd: int, deadline: float, max_bytes: int) -> bytes:
@@ -71,6 +185,7 @@ def exec_command(
       write_stdin(pid, ...) call can feed an interactive prompt.
     """
     cwd_resolved = _resolve_cwd(cwd)
+    _validate_command_policy(command)
 
     master_fd, slave_fd = pty.openpty()
     proc = subprocess.Popen(
@@ -81,6 +196,7 @@ def exec_command(
         cwd=cwd_resolved,
         start_new_session=True,
         close_fds=True,
+        env=_safe_subprocess_env(),
     )
     os.close(slave_fd)
 
@@ -179,7 +295,7 @@ def write_stdin(
 
 def _validate_workspace_path(path: str) -> Path:
     """Reject blocked filenames and paths that escape /workspace; return resolved path."""
-    if _is_blocked_path(path):
+    if _is_blocked_write_path(path):
         raise PermissionError(f"Writing to {path} is blocked by security policy.")
     target = (Path(WORKSPACE) / path).resolve()
     ws = Path(WORKSPACE).resolve()
@@ -221,6 +337,7 @@ def patch_file(path: str, diff: str) -> dict:
         capture_output=True,
         text=True,
         timeout=30,
+        env=_safe_subprocess_env(),
     )
     if git_result.returncode == 0:
         return {
@@ -241,6 +358,7 @@ def patch_file(path: str, diff: str) -> dict:
             capture_output=True,
             text=True,
             timeout=30,
+            env=_safe_subprocess_env(),
         )
     finally:
         try:

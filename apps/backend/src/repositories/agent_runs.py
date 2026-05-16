@@ -3,6 +3,7 @@ import uuid
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, select
 
+from src.core.config import settings
 from src.models.agent_run import AgentRun
 from src.models.agent_run_event import AgentRunEvent
 from src.models.enums import RunStatus
@@ -113,7 +114,7 @@ def create_agent_run(
     parent_run: AgentRun | None = None,
 ) -> AgentRun:
     branch_name = None
-    model_id = "anthropic/claude-sonnet-4.6"
+    model_id = settings.llm_model_id
     follow_up_instruction = data.follow_up_instruction
 
     if parent_run:

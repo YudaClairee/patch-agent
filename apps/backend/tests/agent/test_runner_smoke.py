@@ -10,8 +10,10 @@ Strategy:
 import uuid
 from unittest.mock import MagicMock, patch
 import pytest
+from docker.errors import APIError
 
-from src.services.agent_runner import _RunContext, dispatch_agent_run
+from src.core.config import settings
+from src.services.agent_runner import _RunContext, _create_run_network, dispatch_agent_run
 from src.models.enums import RunStatus
 
 
@@ -44,6 +46,7 @@ def _make_mock_container(exit_code: int = 0):
 def _make_mock_docker_client(container=None):
     client = MagicMock()
     client.networks.create.return_value = MagicMock()
+    client.networks.list.return_value = []
     client.containers.run.return_value = container or _make_mock_container()
     return client
 
@@ -97,8 +100,35 @@ class TestDispatchAgentRunSuccess:
         ):
             dispatch_agent_run(FAKE_RUN_ID)
 
-        docker_client.networks.create.assert_called_once_with(network_name, driver="bridge")
+        docker_client.networks.create.assert_called_once_with(
+            network_name,
+            driver="bridge",
+            labels={
+                "patch.agent/managed": "true",
+                "patch.agent/network": network_name,
+            },
+        )
         docker_client.networks.remove.assert_called_once_with(network_name)
+
+    def test_network_create_retries_after_stale_network_cleanup(self):
+        """Docker address-pool exhaustion triggers cleanup of unused patch networks."""
+        network_name = f"patch_{FAKE_RUN_ID}"
+        stale_network = MagicMock()
+        stale_network.name = "patch_stale"
+        stale_network.attrs = {"Containers": {}}
+
+        client = MagicMock()
+        client.networks.list.return_value = [stale_network]
+        created_network = MagicMock()
+        client.networks.create.side_effect = [
+            APIError("all predefined address pools have been fully subnetted"),
+            created_network,
+        ]
+
+        assert _create_run_network(client, network_name) is created_network
+
+        stale_network.remove.assert_called_once_with()
+        assert client.networks.create.call_count == 2
 
     def test_container_metadata_written_to_db(self, mock_session_get):
         """container_id and celery_task_id are written to the AgentRun row."""
@@ -196,6 +226,11 @@ class TestFollowUpRun:
         if env is None and len(call_args.args) > 1:
             env = call_args.args[1]
         env = env or {}
+        assert "JWT_SECRET" not in env
+        assert "FERNET_KEY" not in env
+        assert env.get("AGENT_SHELL_NETWORK_ENABLED") == str(
+            settings.agent_shell_network_enabled
+        ).lower()
         assert env.get("HEAD_BRANCH") == "patch/task-abc"
         assert env.get("PARENT_RUN_ID") == parent_id
         assert env.get("FOLLOW_UP_INSTRUCTION") == "Fix the flaky test."

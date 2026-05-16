@@ -6,7 +6,9 @@ workspace_* tool wrappers.
 """
 import os
 import subprocess
+import tempfile
 import uuid
+from contextlib import contextmanager
 from urllib.parse import urlparse
 
 from github import Github, GithubException
@@ -20,15 +22,67 @@ from src.models.enums import PRState
 WORKSPACE = "/workspace"
 
 
-def _run_git(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git"] + args,
-        cwd=WORKSPACE,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=check,
+def _git_base_env() -> dict[str, str]:
+    return {
+        "PATH": os.environ.get(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        ),
+        "HOME": "/tmp",
+        "USER": os.environ.get("USER", "patch"),
+        "LOGNAME": os.environ.get("LOGNAME", "patch"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_PAGER": "cat",
+        "PAGER": "cat",
+    }
+
+
+@contextmanager
+def _git_auth_env(github_token: str | None = None):
+    if not github_token:
+        yield _git_base_env()
+        return
+
+    askpass = tempfile.NamedTemporaryFile("w", delete=False)
+    askpass.write(
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  *Username*) printf '%s\\n' x-access-token ;;\n"
+        "  *) printf '%s\\n' \"$GITHUB_TOKEN\" ;;\n"
+        "esac\n"
     )
+    askpass.close()
+    os.chmod(askpass.name, 0o700)
+
+    env = _git_base_env()
+    env["GIT_ASKPASS"] = askpass.name
+    env["GITHUB_TOKEN"] = github_token
+    try:
+        yield env
+    finally:
+        try:
+            os.unlink(askpass.name)
+        except OSError:
+            pass
+
+
+def _run_git(
+    args: list[str],
+    check: bool = True,
+    github_token: str | None = None,
+) -> subprocess.CompletedProcess:
+    with _git_auth_env(github_token) as env:
+        return subprocess.run(
+            ["git"] + args,
+            cwd=WORKSPACE,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=check,
+            env=env,
+        )
 
 
 def _parse_github_owner_repo(clone_url: str) -> tuple[str, str]:
@@ -81,6 +135,7 @@ def submit_pull_request(title: str, body: str) -> dict:
             title=title,
             body=body,
             gh_repo=gh_repo,
+            github_token=github_token,
         )
     return _handle_initial(
         agent_run_id=agent_run_id,
@@ -89,16 +144,17 @@ def submit_pull_request(title: str, body: str) -> dict:
         title=title,
         body=body,
         gh_repo=gh_repo,
+        github_token=github_token,
     )
 
 
-def _stage_commit_push(branch: str, commit_message: str) -> None:
+def _stage_commit_push(branch: str, commit_message: str, github_token: str) -> None:
     _run_git(["checkout", "-B", branch])
     _run_git(["add", "-A"])
-    commit = _run_git(["commit", "-m", commit_message], check=False)
+    commit = _run_git(["commit", "--no-verify", "-m", commit_message], check=False)
     if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
         raise RuntimeError(f"git commit failed: {commit.stderr or commit.stdout}")
-    _run_git(["push", "-u", "origin", branch])
+    _run_git(["push", "--no-verify", "-u", "origin", branch], github_token=github_token)
 
 
 def _find_existing_pr(gh_repo, branch_name: str):
@@ -111,6 +167,25 @@ def _find_existing_pr(gh_repo, branch_name: str):
     for pr in pulls:
         return pr
     return None
+
+
+def _body_with_notification_mentions(body: str) -> tuple[str, list[str]]:
+    """Return the PR/comment body plus any GitHub mentions to add.
+
+    Notification wiring is intentionally a no-op until reviewer/mention settings
+    exist; keeping the helper explicit avoids submit-time NameErrors.
+    """
+    return body, []
+
+
+def _request_pr_reviewers(pr) -> dict:
+    """Best-effort reviewer notification hook.
+
+    The product does not currently persist reviewer handles, so this returns a
+    stable result shape without making GitHub API calls.
+    """
+    _ = pr
+    return {"requested_reviewers": [], "errors": []}
 
 
 def _upsert_pr_row(
@@ -166,43 +241,57 @@ def _handle_initial(
     title: str,
     body: str,
     gh_repo,
+    github_token: str,
 ) -> dict:
     branch_name = f"patch/task-{agent_run_id}"
+    pr_body, mentions = _body_with_notification_mentions(body)
 
     # Recovery path: a previous attempt may have pushed the branch and opened
     # the PR but failed to persist the DB row. If so, just upsert and return —
     # don't error with "no changes detected".
     existing_pr = _find_existing_pr(gh_repo, branch_name)
     if existing_pr is not None:
+        notification_result = _request_pr_reviewers(existing_pr)
+        if mentions:
+            try:
+                existing_pr.edit(body=pr_body)
+            except GithubException as exc:
+                notification_result["errors"].append(
+                    f"Failed to update PR body with mentions: {exc.data}"
+                )
+                pr_body = body
         _upsert_pr_row(
-            agent_run_id, repository_id, branch_name, base_branch, title, body, existing_pr
+            agent_run_id, repository_id, branch_name, base_branch, title, pr_body, existing_pr
         )
         return {
             "status": "pr_recovered",
             "pr_number": existing_pr.number,
             "pr_url": existing_pr.html_url,
             "branch": branch_name,
+            "notifications": notification_result,
         }
 
     _check_has_changes()
-    _stage_commit_push(branch_name, f"[P.A.T.C.H.] {title}")
+    _stage_commit_push(branch_name, f"[P.A.T.C.H.] {title}", github_token)
 
     try:
         pr = gh_repo.create_pull(
             title=f"[P.A.T.C.H.] {title}",
-            body=body,
+            body=pr_body,
             head=branch_name,
             base=base_branch,
         )
     except GithubException as e:
         raise RuntimeError(f"Failed to create pull request: {e.data}") from e
 
-    _upsert_pr_row(agent_run_id, repository_id, branch_name, base_branch, title, body, pr)
+    notification_result = _request_pr_reviewers(pr)
+    _upsert_pr_row(agent_run_id, repository_id, branch_name, base_branch, title, pr_body, pr)
     return {
         "status": "pr_created",
         "pr_number": pr.number,
         "pr_url": pr.html_url,
         "branch": branch_name,
+        "notifications": notification_result,
     }
 
 
@@ -213,16 +302,20 @@ def _handle_follow_up(
     title: str,
     body: str,
     gh_repo,
+    github_token: str,
 ) -> dict:
     if not head_branch:
         raise RuntimeError("HEAD_BRANCH not set; cannot resolve parent's branch for follow-up.")
 
     _run_git(["checkout", head_branch], check=False)
     _run_git(["add", "-A"])
-    commit = _run_git(["commit", "-m", f"[P.A.T.C.H. follow-up] {title}"], check=False)
+    commit = _run_git(
+        ["commit", "--no-verify", "-m", f"[P.A.T.C.H. follow-up] {title}"],
+        check=False,
+    )
     if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
         raise RuntimeError(f"git commit failed: {commit.stderr or commit.stdout}")
-    _run_git(["push", "origin", head_branch])
+    _run_git(["push", "--no-verify", "origin", head_branch], github_token=github_token)
 
     with Session(engine) as session:
         existing_pr = session.exec(
@@ -236,8 +329,9 @@ def _handle_follow_up(
     if existing_pr:
         try:
             gh_pr = gh_repo.get_pull(existing_pr.github_pr_number)
+            comment_body, _mentions = _body_with_notification_mentions(body)
             gh_pr.create_issue_comment(
-                f"**P.A.T.C.H. follow-up committed**\n\n{body}"
+                f"**P.A.T.C.H. follow-up committed**\n\n{comment_body}"
             )
             pr_url = existing_pr.url
             pr_number = existing_pr.github_pr_number

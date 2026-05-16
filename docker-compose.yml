@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -38,6 +38,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URL: redis://valkey:6379/0
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
     env_file:
       - ./apps/backend/.env
     depends_on:
@@ -56,6 +57,9 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/postgres
       REDIS_URL: redis://valkey:6379/0
+      AGENT_DATABASE_URL: postgresql://postgres:postgres@host.docker.internal:5433/postgres
+      AGENT_REDIS_URL: redis://host.docker.internal:6379/0
+      AGENT_ALLOW_HOST_GATEWAY: "true"
     env_file:
       - ./apps/backend/.env
     depends_on:
@@ -66,10 +70,13 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./apps/frontend
+    build:
+      context: ./apps/frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-ws://localhost:8000}
     ports:
       - "3000:3000"
     depends_on:
       - backend
     restart: unless-stopped
-

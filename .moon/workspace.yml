@@ -6,6 +6,6 @@ projects:
   ui: "apps/frontend/packages/ui"
 
 vcs:
-  manager: "git"
+  client: "git"
   defaultBranch: "main"
   provider: "github"

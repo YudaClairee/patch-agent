@@ -34,11 +34,11 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: "9.12.0"
+          version: "10.33.3"
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20.17.0"
+          node-version: "22"
           cache: pnpm
           cache-dependency-path: apps/frontend/pnpm-lock.yaml
 
@@ -60,4 +60,8 @@ jobs:
           script: |
             cd ~/patch-agent
             git pull origin released
-            docker compose up -d --build
+            docker compose build
+            docker build -f apps/backend/Dockerfile.agent -t patch/agent:latest apps/backend
+            docker compose up -d postgres valkey
+            docker compose run --rm backend uv run alembic upgrade head
+            docker compose up -d

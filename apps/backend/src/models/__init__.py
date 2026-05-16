@@ -1,5 +1,6 @@
 from src.models.agent_run import AgentRun
 from src.models.agent_run_event import AgentRunEvent
+from src.models.code_chunk import CodeChunk
 from src.models.enums import (
     EventType,
     PRState,
@@ -17,6 +18,7 @@ from src.models.user import User
 __all__ = [
     "AgentRun",
     "AgentRunEvent",
+    "CodeChunk",
     "EventType",
     "GithubCredential",
     "PRState",

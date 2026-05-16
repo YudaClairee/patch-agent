@@ -4,15 +4,17 @@ The container runs src.ai.runner, which handles all agent logic and DB persisten
 This task is responsible for: container lifecycle, env injection, and failure finalization.
 """
 import uuid
-from datetime import datetime, timezone
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import docker
+from docker.errors import APIError
 from sqlmodel import Session, select
 
 from src.celery_app import celery_app
 from src.core.config import settings
 from src.core.database import engine
+from src.core.redaction import redact_text
 from src.models.agent_run import AgentRun
 from src.models.github_credential import GithubCredential
 from src.models.enums import RunStatus
@@ -87,14 +89,15 @@ def _for_container(url: str) -> str:
 
 def _build_env(ctx: _RunContext) -> dict[str, str]:
     env = {
+        "PATCH_RUNTIME": "agent",
         "AGENT_RUN_ID": ctx.agent_run_id,
         "INSTRUCTION": ctx.instruction,
         "REPO_CLONE_URL": ctx.clone_url,
         "BASE_BRANCH": ctx.base_branch,
         "GITHUB_TOKEN": ctx.github_token,
         "REPOSITORY_ID": ctx.repository_id,
-        "DATABASE_URL": _for_container(settings.database_url),
-        "REDIS_URL": _for_container(settings.redis_url),
+        "DATABASE_URL": settings.agent_database_url or _for_container(settings.database_url),
+        "REDIS_URL": settings.agent_redis_url or _for_container(settings.redis_url),
         "LLM_MODEL_ID": settings.llm_model_id,
         "LLM_API_KEY": settings.llm_api_key,
         "LLM_BASE_URL": settings.llm_base_url,
@@ -106,7 +109,7 @@ def _build_env(ctx: _RunContext) -> dict[str, str]:
         "LANGFUSE_PUBLIC_KEY": settings.langfuse_public_key,
         "LANGFUSE_SECRET_KEY": settings.langfuse_secret_key,
         "LANGFUSE_HOST": settings.langfuse_host,
-        "FERNET_KEY": settings.fernet_key,
+        "AGENT_SHELL_NETWORK_ENABLED": str(settings.agent_shell_network_enabled).lower(),
     }
     if ctx.head_branch:
         env["HEAD_BRANCH"] = ctx.head_branch
@@ -115,6 +118,43 @@ def _build_env(ctx: _RunContext) -> dict[str, str]:
     if ctx.follow_up_instruction:
         env["FOLLOW_UP_INSTRUCTION"] = ctx.follow_up_instruction
     return env
+
+
+def _is_address_pool_exhaustion(exc: APIError) -> bool:
+    message = str(getattr(exc, "explanation", "") or exc).lower()
+    return "address pool" in message or "fully subnetted" in message
+
+
+def _cleanup_stale_patch_networks(client, keep_network_name: str) -> int:
+    """Best-effort cleanup of unused per-run networks from old agent runs."""
+    removed = 0
+    for network in client.networks.list():
+        name = getattr(network, "name", "")
+        if not name.startswith("patch_") or name == keep_network_name:
+            continue
+        containers = getattr(network, "attrs", {}).get("Containers") or {}
+        if containers:
+            continue
+        try:
+            network.remove()
+            removed += 1
+        except APIError:
+            continue
+    return removed
+
+
+def _create_run_network(client, network_name: str):
+    labels = {
+        "patch.agent/managed": "true",
+        "patch.agent/network": network_name,
+    }
+    try:
+        return client.networks.create(network_name, driver="bridge", labels=labels)
+    except APIError as exc:
+        if not _is_address_pool_exhaustion(exc):
+            raise
+        _cleanup_stale_patch_networks(client, keep_network_name=network_name)
+        return client.networks.create(network_name, driver="bridge", labels=labels)
 
 
 @celery_app.task(bind=True, name="dispatch_agent_run")
@@ -130,8 +170,10 @@ def dispatch_agent_run(self, agent_run_id: str) -> None:
         env = _build_env(ctx)
         sandbox_opts = get_sandbox_options(agent_run_id)
 
-        # Create an isolated bridge network for this run
-        network = client.networks.create(network_name, driver="bridge")
+        # Create an isolated bridge network for this run. Docker can exhaust its
+        # default bridge subnet pool if old run networks were left behind, so
+        # creation retries once after removing unused patch_* networks.
+        network = _create_run_network(client, network_name)
 
         # 'network' key in sandbox_opts refers to the network name;
         # docker-py uses the 'network' kwarg on containers.run directly
@@ -169,7 +211,9 @@ def dispatch_agent_run(self, agent_run_id: str) -> None:
                     run_row.status = RunStatus.failed
                     run_row.finished_at = _now()
                     run_row.error_message = (
-                        f"Container exited with code {exit_code}\n--- container logs (last 80 lines) ---\n{logs_tail}"
+                        redact_text(
+                            f"Container exited with code {exit_code}\n--- container logs (last 80 lines) ---\n{logs_tail}"
+                        )
                     )[:8000]
                     session.add(run_row)
                     session.commit()
@@ -185,7 +229,10 @@ def dispatch_agent_run(self, agent_run_id: str) -> None:
                     run_row.status = RunStatus.failed
                     run_row.finished_at = _now()
                     run_row.error_message = (
-                        f"Container exited 0 but never started the run.\n--- container logs (last 80 lines) ---\n{logs_tail}"
+                        redact_text(
+                            "Container exited 0 but never started the run.\n"
+                            f"--- container logs (last 80 lines) ---\n{logs_tail}"
+                        )
                     )[:8000]
                     session.add(run_row)
                     session.commit()
@@ -198,7 +245,7 @@ def dispatch_agent_run(self, agent_run_id: str) -> None:
                 if run_row and run_row.status in (RunStatus.queued, RunStatus.running):
                     run_row.status = RunStatus.failed
                     run_row.finished_at = _now()
-                    run_row.error_message = f"Host dispatch error: {str(e)}"
+                    run_row.error_message = redact_text(f"Host dispatch error: {str(e)}")
                     session.add(run_row)
                     session.commit()
         except Exception:
