@@ -19,3 +19,5 @@ __pycache__
 
 # Langfuse trace artifacts (dev exports)
 trace-*.json
+
+.ruff_cache/

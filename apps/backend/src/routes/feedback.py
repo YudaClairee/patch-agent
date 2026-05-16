@@ -43,12 +43,39 @@ def submit_feedback(
             detail="Parent agent run must be succeeded before submitting feedback.",
         )
 
+    follow_up_target = agent_runs_repo.resolve_follow_up_target(session, parent_run)
+    if follow_up_target is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Parent agent run must have an open pull request and a matching "
+                "head branch before submitting feedback."
+            ),
+        )
+    branch_name, _parent_pr = follow_up_target
+
+    active_follow_up = agent_runs_repo.get_active_follow_up_for_branch(
+        session, parent_run.task_id, branch_name
+    )
+    if active_follow_up is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "A follow-up run is already queued or running for this pull "
+                "request. Wait for it to finish before submitting more feedback."
+            ),
+        )
+
+    if parent_run.branch_name != branch_name:
+        parent_run.branch_name = branch_name
+        session.add(parent_run)
+
     try:
         new_run = AgentRun(
             task_id=parent_run.task_id,
             parent_run_id=parent_run.id,
             follow_up_instruction=body.instruction,
-            branch_name=parent_run.branch_name,
+            branch_name=branch_name,
             status=RunStatus.queued,
             model_id=parent_run.model_id,
             prompt_version=parent_run.prompt_version,
@@ -72,4 +99,3 @@ def submit_feedback(
     enqueue_agent_run(new_run.id)
 
     return AgentRunRead.model_validate(new_run)
-

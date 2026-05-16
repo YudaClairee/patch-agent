@@ -610,9 +610,8 @@ async def run_agent(
     """Run the agent to completion. Every observable action (assistant text, tool call,
     tool result, error) is emitted via `emitter` — which writes to DB and Redis — so the
     UI live-stream matches what Langfuse traces."""
-    _ = (workspace_path, branch)
-
     agent_instructions = SYSTEM_PROMPT
+    _ = branch  # reserved for future use; callers already pass it
     if follow_up_context:
         agent_instructions += f"\n\n# Follow-up Context\n{follow_up_context}"
 

@@ -10,7 +10,6 @@ import os
 import pty
 import re
 import select
-import shutil
 import signal
 import shlex
 import subprocess
@@ -690,6 +689,3 @@ def patch_file(path: str, diff: str) -> dict:
 
 __all__ = ["exec_command", "write_stdin", "patch_file", "write_file"]
 
-
-# Silence unused-import warnings from shutil — kept reserved for future helpers.
-_ = shutil

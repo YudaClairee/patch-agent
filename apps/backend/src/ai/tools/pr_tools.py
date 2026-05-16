@@ -108,6 +108,27 @@ def _check_has_changes() -> None:
         )
 
 
+def _check_worktree_has_changes() -> None:
+    status = _run_git(["status", "--porcelain"], check=False)
+    if status.returncode != 0:
+        raise RuntimeError(f"git status failed: {status.stderr or status.stdout}")
+    if not status.stdout.strip():
+        raise RuntimeError(
+            "No follow-up changes detected in the workspace. Make edits before submitting."
+        )
+
+
+def _ensure_remote_branch_matches_head(branch: str, github_token: str) -> None:
+    _run_git(["fetch", "origin", branch], github_token=github_token)
+    local_head = _run_git(["rev-parse", "HEAD"]).stdout.strip()
+    remote_head = _run_git(["rev-parse", "FETCH_HEAD"]).stdout.strip()
+    if local_head != remote_head:
+        raise RuntimeError(
+            "The pull request branch changed while this follow-up was running. "
+            "Please start a new follow-up from the latest PR branch."
+        )
+
+
 def submit_pull_request(title: str, body: str) -> dict:
     """
     Create or update a Pull Request for the current agent run.
@@ -169,6 +190,35 @@ def _find_existing_pr(gh_repo, branch_name: str):
     return None
 
 
+def _find_pr_for_run_ancestry(
+    session: Session,
+    run_id: uuid.UUID,
+) -> PullRequest | None:
+    seen_run_ids: set[uuid.UUID] = set()
+    current_run_id: uuid.UUID | None = run_id
+    depth = 0
+    max_depth = 50
+
+    while current_run_id is not None and depth < max_depth:
+        if current_run_id in seen_run_ids:
+            break
+        seen_run_ids.add(current_run_id)
+
+        pr = session.exec(
+            select(PullRequest).where(PullRequest.agent_run_id == current_run_id)
+        ).first()
+        if pr is not None:
+            return pr
+
+        run = session.get(AgentRun, current_run_id)
+        if run is None:
+            break
+        current_run_id = run.parent_run_id
+        depth += 1
+
+    return None
+
+
 def _body_with_notification_mentions(body: str) -> tuple[str, list[str]]:
     """Return the PR/comment body plus any GitHub mentions to add.
 
@@ -178,13 +228,12 @@ def _body_with_notification_mentions(body: str) -> tuple[str, list[str]]:
     return body, []
 
 
-def _request_pr_reviewers(pr) -> dict:
+def _request_pr_reviewers(_pr) -> dict:
     """Best-effort reviewer notification hook.
 
     The product does not currently persist reviewer handles, so this returns a
     stable result shape without making GitHub API calls.
     """
-    _ = pr
     return {"requested_reviewers": [], "errors": []}
 
 
@@ -307,7 +356,15 @@ def _handle_follow_up(
     if not head_branch:
         raise RuntimeError("HEAD_BRANCH not set; cannot resolve parent's branch for follow-up.")
 
-    _run_git(["checkout", head_branch], check=False)
+    with Session(engine) as session:
+        existing_pr = _find_pr_for_run_ancestry(session, uuid.UUID(parent_run_id))
+
+    if existing_pr is None:
+        raise RuntimeError("Parent pull request not found for follow-up run.")
+
+    _run_git(["checkout", head_branch])
+    _ensure_remote_branch_matches_head(head_branch, github_token)
+    _check_worktree_has_changes()
     _run_git(["add", "-A"])
     commit = _run_git(
         ["commit", "--no-verify", "-m", f"[P.A.T.C.H. follow-up] {title}"],
@@ -315,28 +372,30 @@ def _handle_follow_up(
     )
     if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
         raise RuntimeError(f"git commit failed: {commit.stderr or commit.stdout}")
-    _run_git(["push", "--no-verify", "origin", head_branch], github_token=github_token)
-
-    with Session(engine) as session:
-        existing_pr = session.exec(
-            select(PullRequest).where(
-                PullRequest.agent_run_id == uuid.UUID(parent_run_id)
+    push = _run_git(
+        ["push", "--no-verify", "origin", head_branch],
+        check=False,
+        github_token=github_token,
+    )
+    if push.returncode != 0:
+        push_output = (push.stderr or push.stdout).lower()
+        if "non-fast-forward" in push_output or "fetch first" in push_output:
+            raise RuntimeError(
+                "The pull request branch was updated by another follow-up before this "
+                "run could push. Please start a new follow-up from the latest branch."
             )
-        ).first()
+        raise RuntimeError(f"git push failed: {push.stderr or push.stdout}")
 
-    pr_url = ""
-    pr_number = 0
-    if existing_pr:
-        try:
-            gh_pr = gh_repo.get_pull(existing_pr.github_pr_number)
-            comment_body, _mentions = _body_with_notification_mentions(body)
-            gh_pr.create_issue_comment(
-                f"**P.A.T.C.H. follow-up committed**\n\n{comment_body}"
-            )
-            pr_url = existing_pr.url
-            pr_number = existing_pr.github_pr_number
-        except GithubException as e:
-            raise RuntimeError(f"Failed to comment on pull request: {e.data}") from e
+    try:
+        gh_pr = gh_repo.get_pull(existing_pr.github_pr_number)
+        comment_body, _mentions = _body_with_notification_mentions(body)
+        gh_pr.create_issue_comment(
+            f"**P.A.T.C.H. follow-up committed**\n\n{comment_body}"
+        )
+        pr_url = existing_pr.url
+        pr_number = existing_pr.github_pr_number
+    except GithubException as e:
+        raise RuntimeError(f"Failed to comment on pull request: {e.data}") from e
 
     with Session(engine) as session:
         run = session.get(AgentRun, uuid.UUID(agent_run_id))

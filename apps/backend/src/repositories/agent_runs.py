@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 from src.core.config import settings
 from src.models.agent_run import AgentRun
 from src.models.agent_run_event import AgentRunEvent
-from src.models.enums import RunStatus
+from src.models.enums import PRState, RunStatus
 from src.models.pull_request import PullRequest
 from src.models.repository import Repository
 from src.models.task import Task
@@ -192,3 +192,39 @@ def get_pull_request_for_run(
         depth += 1
 
     return None
+
+
+def get_active_follow_up_for_branch(
+    session: Session,
+    task_id: uuid.UUID,
+    branch_name: str,
+) -> AgentRun | None:
+    statement = (
+        select(AgentRun)
+        .where(
+            AgentRun.task_id == task_id,
+            AgentRun.branch_name == branch_name,
+            AgentRun.parent_run_id.is_not(None),  # type: ignore[attr-defined]
+            AgentRun.status.in_([RunStatus.queued, RunStatus.running]),  # type: ignore[attr-defined]
+        )
+        .order_by(AgentRun.queued_at.asc())
+        .limit(1)
+    )
+    return session.exec(statement).first()
+
+
+def resolve_follow_up_target(
+    session: Session,
+    parent_run: AgentRun,
+) -> tuple[str, PullRequest] | None:
+    pr = get_pull_request_for_run(session, parent_run.id)
+    if pr is None or pr.state not in {PRState.open, PRState.draft}:
+        return None
+
+    branch_name = parent_run.branch_name or pr.head_branch
+    if not branch_name:
+        return None
+    if parent_run.branch_name and pr.head_branch and parent_run.branch_name != pr.head_branch:
+        return None
+
+    return branch_name, pr

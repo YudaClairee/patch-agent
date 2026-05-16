@@ -73,6 +73,30 @@ async def create_task(
                     f"follow-up (current status: '{parent_run.status.value}')."
                 ),
             )
+        follow_up_target = agent_run_repo.resolve_follow_up_target(session, parent_run)
+        if follow_up_target is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Parent agent run must have an open pull request and a matching "
+                    "head branch before creating a follow-up."
+                ),
+            )
+        branch_name, _parent_pr = follow_up_target
+        active_follow_up = agent_run_repo.get_active_follow_up_for_branch(
+            session, parent_run.task_id, branch_name
+        )
+        if active_follow_up is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "A follow-up run is already queued or running for this pull "
+                    "request. Wait for it to finish before submitting more feedback."
+                ),
+            )
+        if parent_run.branch_name != branch_name:
+            parent_run.branch_name = branch_name
+            session.add(parent_run)
 
     try:
         task = task_repo.create_task(session, user.id, body)
