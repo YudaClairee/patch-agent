@@ -18,11 +18,14 @@ logger = logging.getLogger(__name__)
 
 
 def _publish(agent_run_id: str, frame: dict) -> None:
-    r = redis.Redis.from_url(settings.redis_url)
     try:
-        r.publish(f"agent_run:{agent_run_id}", json.dumps(frame, default=str))
-    finally:
-        r.close()
+        r = redis.Redis.from_url(settings.redis_url)
+        try:
+            r.publish(f"agent_run:{agent_run_id}", json.dumps(frame, default=str))
+        finally:
+            r.close()
+    except (redis.RedisError, OSError) as exc:
+        logger.warning("failed to publish Redis frame for run %s: %s", agent_run_id, exc)
 
 
 def publish_event(agent_run_id: str, payload: dict) -> None:
