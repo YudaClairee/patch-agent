@@ -4,7 +4,7 @@ Codex-style minimal tool surface for the P.A.T.C.H. agent.
 Three primitives that compose to cover every workflow:
 - exec_command: PTY-backed shell, restricted to /workspace, timeout-bounded
 - write_stdin: write to a backgrounded PTY (for interactive prompts / TUIs)
-- patch_file: apply a unified diff via `patch -p1`, run from /workspace
+- patch_file: apply a targeted patch to one file under /workspace
 """
 import os
 import pty
@@ -20,6 +20,13 @@ from pathlib import Path
 
 WORKSPACE = "/workspace"
 _MAX_OUTPUT_BYTES = 64 * 1024  # 64KB cap per call to keep token cost sane
+_FENCED_PATCH_RE = re.compile(r"```(?:diff|patch)?\s*\n(.*?)\n```", re.I | re.S)
+_PATCH_MARKERS = ("diff --git ", "--- ", "@@ ", "*** Begin Patch")
+_UNIFIED_HEADER_RE = re.compile(r"^(---|\+\+\+)\s+", re.M)
+_NUMBERED_HUNK_RE = re.compile(
+    r"^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@",
+    re.M,
+)
 _BLOCKED_WRITE_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 _BLOCKED_PATH_PATTERNS = (
     re.compile(
@@ -317,21 +324,87 @@ def write_file(path: str, content: str) -> dict:
     return {"ok": True, "path": str(target.relative_to(WORKSPACE)), "bytes_written": len(content)}
 
 
-def patch_file(path: str, diff: str) -> dict:
-    """
-    Apply a unified diff to an EXISTING file under /workspace.
-    Tries `git apply --recount` first (forgiving of wrong line numbers in `@@` headers),
-    then falls back to `patch -p1 -F3` (fuzz=3 = tolerates ~3 lines of context drift).
-    For NEW files / full rewrites, prefer `write_file`.
-    """
-    _validate_workspace_path(path)
+def _workspace_relative_path(target: Path) -> str:
+    return target.relative_to(Path(WORKSPACE).resolve()).as_posix()
 
-    if not diff.endswith("\n"):
-        diff = diff + "\n"
 
-    # Attempt 1: git apply --recount (recomputes @@ line counts; very forgiving of LLM mistakes)
-    git_result = subprocess.run(
-        ["git", "apply", "--recount", "--whitespace=fix", "-p1", "-"],
+def _looks_like_patch(text: str) -> bool:
+    return any(marker in text for marker in _PATCH_MARKERS) or bool(
+        _UNIFIED_HEADER_RE.search(text) or _NUMBERED_HUNK_RE.search(text)
+    )
+
+
+def _extract_patch_payload(diff: str) -> str:
+    """Accept raw patches and common markdown-wrapped patches from model output."""
+    fenced_blocks = _FENCED_PATCH_RE.findall(diff)
+    for block in fenced_blocks:
+        if _looks_like_patch(block):
+            text = block.strip("\n")
+            return text + "\n"
+
+    text = diff.strip("\n")
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if any(line.lstrip().startswith(marker) for marker in _PATCH_MARKERS):
+            text = "\n".join(lines[index:])
+            break
+    if text.endswith("```"):
+        text = text.rsplit("```", 1)[0].rstrip("\n")
+    return text + "\n"
+
+
+def _patch_header_path(raw: str) -> str | None:
+    token = raw.strip()
+    if not token:
+        return None
+    try:
+        parts = shlex.split(token, comments=False, posix=True)
+    except ValueError:
+        parts = token.split()
+    if not parts:
+        return None
+
+    path = parts[0]
+    if path == "/dev/null":
+        return None
+    if path.startswith("/workspace/"):
+        path = path.removeprefix("/workspace/")
+    if path.startswith(("a/", "b/")):
+        path = path[2:]
+    return Path(path).as_posix()
+
+
+def _validate_patch_targets(diff: str, expected_path: str) -> None:
+    paths: set[str] = set()
+    for line in diff.splitlines():
+        if line.startswith(("--- ", "+++ ")):
+            path = _patch_header_path(line[4:])
+            if path is None:
+                continue
+            _validate_workspace_path(path)
+            paths.add(path)
+
+    if paths and paths != {expected_path}:
+        raise PermissionError(
+            f"Patch targets {sorted(paths)!r}, but patch_file path is {expected_path!r}."
+        )
+
+
+def _patch_candidates(diff: str, expected_path: str) -> list[tuple[str, str]]:
+    candidates = [("as-provided", diff)]
+    if not _UNIFIED_HEADER_RE.search(diff) and _NUMBERED_HUNK_RE.search(diff):
+        candidates.append(
+            (
+                "hunk-only",
+                f"--- a/{expected_path}\n+++ b/{expected_path}\n{diff.lstrip()}",
+            )
+        )
+    return candidates
+
+
+def _run_git_apply(diff: str, strip: int) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "apply", "--recount", "--whitespace=fix", f"-p{strip}", "-"],
         cwd=WORKSPACE,
         input=diff,
         capture_output=True,
@@ -339,21 +412,34 @@ def patch_file(path: str, diff: str) -> dict:
         timeout=30,
         env=_safe_subprocess_env(),
     )
-    if git_result.returncode == 0:
-        return {
-            "ok": True,
-            "applied_with": "git apply --recount",
-            "stdout": git_result.stdout,
-            "stderr": git_result.stderr,
-        }
 
-    # Attempt 2: patch -F3 (fuzz factor 3)
+
+def _run_patch(diff: str, strip: int) -> subprocess.CompletedProcess[str]:
     with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False) as f:
         f.write(diff)
         patch_path = f.name
     try:
-        result = subprocess.run(
-            ["patch", "-p1", "-F3", "--no-backup-if-mismatch", "-i", patch_path],
+        dry_run = subprocess.run(
+            [
+                "patch",
+                f"-p{strip}",
+                "-F3",
+                "--dry-run",
+                "--no-backup-if-mismatch",
+                "-i",
+                patch_path,
+            ],
+            cwd=WORKSPACE,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=_safe_subprocess_env(),
+        )
+        if dry_run.returncode != 0:
+            return dry_run
+
+        return subprocess.run(
+            ["patch", f"-p{strip}", "-F3", "--no-backup-if-mismatch", "-i", patch_path],
             cwd=WORKSPACE,
             capture_output=True,
             text=True,
@@ -366,20 +452,240 @@ def patch_file(path: str, diff: str) -> dict:
         except OSError:
             pass
 
+
+def _find_line_sequence(lines: list[str], sequence: list[str], start: int) -> int | None:
+    if not sequence:
+        return None
+    max_start = len(lines) - len(sequence)
+    for index in range(start, max_start + 1):
+        if lines[index : index + len(sequence)] == sequence:
+            return index
+    for index in range(0, start):
+        if lines[index : index + len(sequence)] == sequence:
+            return index
+    return None
+
+
+def _parse_line_patch_hunks(lines: list[str]) -> list[list[tuple[str, str]]]:
+    hunks: list[list[tuple[str, str]]] = []
+    current: list[tuple[str, str]] = []
+
+    for line in lines:
+        if line.startswith("@@"):
+            if current:
+                hunks.append(current)
+                current = []
+            continue
+        if line == "*** End of File" or line.startswith("*** "):
+            continue
+        if line.startswith((" ", "-", "+")):
+            current.append((line[0], line[1:]))
+            continue
+        if line == "":
+            current.append((" ", ""))
+            continue
+        raise ValueError(f"Unsupported patch line: {line!r}")
+
+    if current:
+        hunks.append(current)
+    return hunks
+
+
+def _apply_line_hunks(target: Path, hunks: list[list[tuple[str, str]]]) -> int:
+    if not hunks:
+        raise ValueError("No editable hunks were found in the patch.")
+
+    original = target.read_text()
+    file_lines = original.splitlines()
+    final_newline = original.endswith("\n")
+    cursor = 0
+
+    for hunk in hunks:
+        old_lines = [text for kind, text in hunk if kind in {" ", "-"}]
+        new_lines = [text for kind, text in hunk if kind in {" ", "+"}]
+        start = _find_line_sequence(file_lines, old_lines, cursor)
+        if start is None:
+            raise ValueError(
+                "Could not locate patch hunk in target file. "
+                "Read the file again or provide more context lines."
+            )
+        file_lines[start : start + len(old_lines)] = new_lines
+        cursor = start + len(new_lines)
+
+    updated = "\n".join(file_lines)
+    if final_newline or original == "":
+        updated += "\n"
+    target.write_text(updated)
+    return len(hunks)
+
+
+def _apply_codex_style_patch(target: Path, expected_path: str, diff: str) -> dict | None:
+    if "*** Begin Patch" not in diff or "*** Update File:" not in diff:
+        return None
+
+    blocks: list[list[str]] = []
+    current_path: str | None = None
+    current_lines: list[str] = []
+
+    def flush_current() -> None:
+        nonlocal current_path, current_lines
+        if current_path is None:
+            return
+        if current_path != expected_path:
+            raise PermissionError(
+                f"Patch targets {current_path!r}, but patch_file path is {expected_path!r}."
+            )
+        blocks.append(current_lines)
+        current_path = None
+        current_lines = []
+
+    for line in diff.splitlines():
+        if line.startswith("*** Update File:"):
+            flush_current()
+            path = _patch_header_path(line.split(":", 1)[1])
+            if path is None:
+                raise ValueError("Codex patch is missing an update file path.")
+            _validate_workspace_path(path)
+            current_path = path
+            current_lines = []
+            continue
+        if line == "*** End Patch":
+            flush_current()
+            break
+        if current_path is not None:
+            current_lines.append(line)
+
+    if not blocks:
+        raise ValueError("Codex patch did not contain an update block.")
+
+    all_hunks: list[list[tuple[str, str]]] = []
+    for block in blocks:
+        all_hunks.extend(_parse_line_patch_hunks(block))
+    hunk_count = _apply_line_hunks(target, all_hunks)
+
     return {
-        "ok": result.returncode == 0,
-        "applied_with": "patch -F3" if result.returncode == 0 else "failed",
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "git_apply_stderr": git_result.stderr,
-        "exit_code": result.returncode,
-        "hint": (
-            "Both `git apply` and `patch` rejected this diff. Common LLM mistakes: "
-            "wrong line counts in @@ headers, missing space-prefix on context lines, "
-            "no `--- /dev/null` for new files. For new files or full rewrites, use "
-            "`write_file(path, content)` instead — no diff needed."
-        ) if result.returncode != 0 else None,
+        "ok": True,
+        "path": expected_path,
+        "applied_with": "codex apply_patch format",
+        "hunks_applied": hunk_count,
+        "stdout": "",
+        "stderr": "",
     }
+
+
+def _patch_failure(
+    expected_path: str,
+    message: str,
+    stdout: str = "",
+    stderr: str = "",
+    git_apply_stderr: str = "",
+    exit_code: int = 1,
+    attempts: list[dict[str, str | int]] | None = None,
+) -> dict:
+    return {
+        "ok": False,
+        "path": expected_path,
+        "applied_with": "failed",
+        "stdout": stdout,
+        "stderr": stderr or message,
+        "git_apply_stderr": git_apply_stderr,
+        "exit_code": exit_code,
+        "attempts": (attempts or [])[-8:],
+        "hint": (
+            "Patch was rejected. Accepted formats: unified diff with ---/+++ headers, "
+            "numbered hunk-only diff starting with @@, or Codex-style "
+            "*** Begin Patch / *** Update File. Context lines must include their "
+            "leading space. For new files or full rewrites, use write_file(path, content)."
+        ),
+    }
+
+
+def patch_file(path: str, diff: str) -> dict:
+    """
+    Apply a targeted patch to an EXISTING file under /workspace.
+    Accepts unified diffs, hunk-only unified diffs, and Codex-style update patches.
+    Tries `git apply --recount` first, then falls back to `patch -F3`.
+    For NEW files / full rewrites, prefer `write_file`.
+    """
+    target = _validate_workspace_path(path)
+    expected_path = _workspace_relative_path(target)
+    if not target.exists() or not target.is_file():
+        return _patch_failure(
+            expected_path,
+            f"patch_file requires an existing file: {expected_path}",
+        )
+
+    diff = _extract_patch_payload(diff)
+    try:
+        codex_result = _apply_codex_style_patch(target, expected_path, diff)
+    except ValueError as exc:
+        return _patch_failure(expected_path, str(exc))
+    if codex_result is not None:
+        return codex_result
+
+    attempts: list[dict[str, str | int]] = []
+    first_git_stderr = ""
+    last_result: subprocess.CompletedProcess[str] | None = None
+
+    for source, candidate in _patch_candidates(diff, expected_path):
+        _validate_patch_targets(candidate, expected_path)
+
+        for strip in (1, 0):
+            result = _run_git_apply(candidate, strip)
+            last_result = result
+            first_git_stderr = first_git_stderr or result.stderr
+            attempts.append(
+                {
+                    "tool": f"git apply -p{strip}",
+                    "source": source,
+                    "exit_code": result.returncode,
+                    "stderr": result.stderr,
+                }
+            )
+            if result.returncode == 0:
+                return {
+                    "ok": True,
+                    "path": expected_path,
+                    "applied_with": f"git apply --recount -p{strip}",
+                    "normalized_from": source,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                }
+
+        for strip in (1, 0):
+            result = _run_patch(candidate, strip)
+            last_result = result
+            attempts.append(
+                {
+                    "tool": f"patch -p{strip} -F3",
+                    "source": source,
+                    "exit_code": result.returncode,
+                    "stderr": result.stderr,
+                }
+            )
+            if result.returncode == 0:
+                return {
+                    "ok": True,
+                    "path": expected_path,
+                    "applied_with": f"patch -p{strip} -F3",
+                    "normalized_from": source,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                }
+
+    stdout = last_result.stdout if last_result is not None else ""
+    stderr = last_result.stderr if last_result is not None else ""
+    exit_code = last_result.returncode if last_result is not None else 1
+
+    return _patch_failure(
+        expected_path,
+        "Patch was rejected.",
+        stdout=stdout,
+        stderr=stderr,
+        git_apply_stderr=first_git_stderr,
+        exit_code=exit_code,
+        attempts=attempts,
+    )
 
 
 __all__ = ["exec_command", "write_stdin", "patch_file", "write_file"]

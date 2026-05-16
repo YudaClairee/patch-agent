@@ -177,8 +177,10 @@ and the task fails.
    Returns {ok, path, bytes_written}.
 
 9. patch_file(path, diff)
-   Apply a unified diff to an EXISTING file. Tries `git apply --recount` first
-   (forgiving of wrong @@ line counts), falls back to `patch -F3` (fuzz 3).
+   Apply a targeted patch to an EXISTING file. Accepts unified diffs with
+   ---/+++ headers, numbered hunk-only diffs beginning with @@, and Codex-style
+   *** Begin Patch / *** Update File blocks. Tries `git apply --recount` first,
+   then falls back to `patch -F3` (fuzz 3).
    ONLY use for surgical edits to existing files. ALWAYS `exec_command("cat path")` FIRST
    so context lines are accurate. If patch_file fails with "malformed patch",
    switch to write_file with the full intended file content.
@@ -517,7 +519,7 @@ def _build_agent(
 
     @tool(name="patch_file")
     def tool_patch_file(path: str, diff: str) -> dict:
-        """Apply a unified diff to an EXISTING file under /workspace. Tries git apply --recount first, then patch -F3. Use write_file for new files."""
+        """Apply a targeted patch to an EXISTING file under /workspace. Accepts unified, hunk-only, or Codex-style update patches. Use write_file for new files."""
         result = _instrumented(
             emitter, "patch_file", patch_file, {"path": path, "diff": diff}
         )
