@@ -1,18 +1,21 @@
 import logging
 import uuid
 from datetime import datetime, timezone
-
 import docker
 import httpx
 from celery.exceptions import CeleryError
 from docker.errors import DockerException, NotFound
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session
+from pydantic import BaseModel
+from sqlmodel import Session, select
 
 from src.celery_app import celery_app
 from src.core.auth import current_user
 from src.core.database import get_session
-from src.models.enums import RunStatus
+from src.models.agent_run import AgentRun
+from src.models.agent_run_event import AgentRunEvent
+from src.models.enums import EventType, RunStatus
+from src.models.task import Task
 from src.models.user import User
 from src.repositories import agent_runs as agent_runs_repo
 from src.schemas.agent_run import AgentRunListItemRead, AgentRunRead
@@ -22,6 +25,21 @@ from src.schemas.pull_request import PullRequestRead
 from src.services.credentials import get_active_token
 from src.services.events import publish_status_change
 from src.services.github_pr import maybe_refresh_pr
+
+
+class ReviewFindingRead(BaseModel):
+    file_path: str
+    severity: str
+    category: str
+    issue: str
+    suggestion: str
+
+
+class ReviewRunRead(BaseModel):
+    reviewer_run_id: str
+    status: RunStatus
+    findings: list[ReviewFindingRead]
+    fix_run_id: str | None = None
 
 TERMINAL_STATUSES = {RunStatus.succeeded, RunStatus.failed, RunStatus.cancelled}
 
@@ -136,6 +154,56 @@ def get_agent_run_diff(
     except httpx.HTTPError as e:
         logger.error(f"GitHub API error: {e}")
         raise HTTPException(status_code=502, detail="GitHub API error")
+
+
+@agent_runs_router.get("/{id}/review", response_model=ReviewRunRead)
+def get_agent_run_review(
+    id: uuid.UUID,
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    """Return the auto-review result for a developer run, including all findings."""
+    run = agent_runs_repo.get_agent_run_for_user(session, id, user.id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Agent run not found")
+    if run.reviewer_run_id is None:
+        raise HTTPException(status_code=404, detail="No review available yet")
+
+    reviewer_run = session.get(AgentRun, run.reviewer_run_id)
+    if not reviewer_run:
+        raise HTTPException(status_code=404, detail="Reviewer run not found")
+
+    # Load review_finding events for the reviewer run
+    finding_events = session.exec(
+        select(AgentRunEvent)
+        .where(
+            AgentRunEvent.agent_run_id == run.reviewer_run_id,
+            AgentRunEvent.event_type == EventType.review_finding,
+        )
+        .order_by(AgentRunEvent.sequence)
+    ).all()
+
+    findings = [ReviewFindingRead(**e.payload) for e in finding_events if isinstance(e.payload, dict)]
+
+    # Check if a fixer run exists (parent_run_id == developer run, run_role == fixer)
+    from src.models.enums import RunRole  # noqa: PLC0415
+    fix_run = session.exec(
+        select(AgentRun)
+        .join(Task, AgentRun.task_id == Task.id)
+        .where(
+            AgentRun.parent_run_id == id,
+            AgentRun.run_role == RunRole.fixer,
+            Task.user_id == user.id,
+        )
+        .order_by(AgentRun.queued_at.desc())
+    ).first()
+
+    return ReviewRunRead(
+        reviewer_run_id=str(run.reviewer_run_id),
+        status=reviewer_run.status,
+        findings=findings,
+        fix_run_id=str(fix_run.id) if fix_run else None,
+    )
 
 
 @agent_runs_router.post("/{id}/cancel", response_model=AgentRunRead, status_code=202)

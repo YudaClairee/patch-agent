@@ -17,8 +17,9 @@ from src.core.database import engine
 from src.core.redaction import redact_text
 from src.models.agent_run import AgentRun
 from src.models.github_credential import GithubCredential
-from src.models.enums import RunStatus
+from src.models.enums import RunRole, RunStatus
 from src.services.credentials import decrypt_token
+from src.services.review_dispatch import enqueue_review_run
 from src.services.sandboxing import get_sandbox_options
 
 
@@ -236,6 +237,17 @@ def dispatch_agent_run(self, agent_run_id: str) -> None:
                     )[:8000]
                     session.add(run_row)
                     session.commit()
+
+        # Trigger auto-review for successful developer runs if enabled
+        if exit_code == 0 and settings.auto_review_enabled:
+            with Session(engine) as session:
+                run_row = session.get(AgentRun, run_uuid)
+                if (
+                    run_row
+                    and run_row.status == RunStatus.succeeded
+                    and run_row.run_role == RunRole.developer
+                ):
+                    enqueue_review_run(run_uuid)
 
     except Exception as e:
         # Finalize any run that's still in a non-terminal state due to host-side errors

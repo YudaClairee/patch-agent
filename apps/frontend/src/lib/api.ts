@@ -39,13 +39,33 @@ export type TaskRead = {
 };
 
 export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+export type RunRole = "developer" | "reviewer" | "fixer";
+export type ReviewSeverity = "critical" | "high" | "medium" | "low";
+export type ReviewCategory = "correctness" | "security" | "tests" | "style" | "performance";
+
+export type ReviewFinding = {
+  file_path: string;
+  severity: ReviewSeverity;
+  category: ReviewCategory;
+  issue: string;
+  suggestion: string;
+};
+
+export type ReviewRunRead = {
+  reviewer_run_id: string;
+  status: AgentRunStatus;
+  findings: ReviewFinding[];
+  fix_run_id: string | null;
+};
 
 export type AgentRunRead = {
   id: string;
   task_id: string;
   instruction: string | null;
   status: AgentRunStatus;
+  run_role: RunRole;
   parent_run_id: string | null;
+  reviewer_run_id: string | null;
   follow_up_instruction: string | null;
   branch_name: string | null;
   model_id: string;
@@ -74,6 +94,7 @@ export type AgentRunListItemRead = {
   task_id: string;
   instruction: string | null;
   status: AgentRunStatus;
+  run_role: RunRole;
   branch_name: string | null;
   queued_at: string;
   started_at: string | null;
@@ -81,7 +102,7 @@ export type AgentRunListItemRead = {
   pull_request: PullRequestSummaryRead | null;
 };
 
-export type EventType = "status_change" | "plan" | "message" | "tool_call" | "tool_result" | "error" | "summary";
+export type EventType = "status_change" | "plan" | "message" | "tool_call" | "tool_result" | "error" | "summary" | "review_finding";
 
 export type AgentRunEventRead = {
   id: string;
@@ -189,6 +210,7 @@ export const apiEndpoints = {
   agentRunDiff: (id: string) => `/agent_runs/${id}/diff`,
   agentRunFeedback: (id: string) => `/agent_runs/${id}/feedback`,
   agentRunCancel: (id: string) => `/agent_runs/${id}/cancel`,
+  agentRunReview: (id: string) => `/agent_runs/${id}/review`,
   githubRepositories: "/github/repositories",
   githubOauthStart: "/auth/github/start",
   agentRunWebSocket: (id: string) => `/ws/agent_runs/${id}`,
@@ -300,4 +322,6 @@ export const patchApi = {
     fetchJson<AgentRunRead>(apiEndpoints.agentRunCancel(id), {
       method: "POST",
     }),
+  getAgentRunReview: (id: string) =>
+    fetchJson<ReviewRunRead>(apiEndpoints.agentRunReview(id)),
 };

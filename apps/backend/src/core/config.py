@@ -103,5 +103,11 @@ class Settings(BaseSettings):
 
         return self
 
+    # --- Auto-Review settings ---
+    # Model used for the reviewer LLM call. Defaults to the main model if blank.
+    llm_reviewer_model_id: str = ""
+    # Set to False to disable automatic post-PR review for every developer run.
+    auto_review_enabled: bool = True
+
 
 settings = Settings()

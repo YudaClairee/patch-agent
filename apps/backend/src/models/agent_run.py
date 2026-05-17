@@ -7,7 +7,7 @@ from sqlalchemy import Column, DateTime, Enum as SAEnum, ForeignKey, Numeric, Te
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlmodel import Field, Relationship, SQLModel
 
-from src.models.enums import RunStatus
+from src.models.enums import RunRole, RunStatus
 
 if TYPE_CHECKING:
     from src.models.agent_run_event import AgentRunEvent
@@ -31,6 +31,14 @@ class AgentRun(SQLModel, table=True):
     status: RunStatus = Field(
         sa_column=Column(SAEnum(RunStatus, name="run_status"), nullable=False)
     )
+    run_role: RunRole = Field(
+        default=RunRole.developer,
+        sa_column=Column(
+            SAEnum(RunRole, name="run_role"),
+            nullable=False,
+            server_default="developer",
+        ),
+    )
 
     parent_run_id: uuid.UUID | None = Field(
         default=None,
@@ -43,6 +51,14 @@ class AgentRun(SQLModel, table=True):
     )
     follow_up_instruction: str | None = Field(
         default=None, sa_column=Column(Text, nullable=True)
+    )
+    reviewer_run_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            PG_UUID(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
 
     container_id: str | None = Field(default=None, max_length=128)
