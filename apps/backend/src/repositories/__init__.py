@@ -1,7 +1,6 @@
 from src.repositories.tasks import (
     create_task,
     get_repository_for_user,
-    get_task,
     get_task_for_user,
     list_tasks_by_user,
 )
@@ -17,7 +16,6 @@ from src.repositories.dashboard import get_dashboard
 __all__ = [
     "create_task",
     "get_repository_for_user",
-    "get_task",
     "get_task_for_user",
     "list_tasks_by_user",
     "create_agent_run",

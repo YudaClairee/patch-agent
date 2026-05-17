@@ -1,6 +1,6 @@
 $schema: "https://moonrepo.dev/schemas/project.json"
 
-type: application
+layer: application
 language: python
 
 tasks:
@@ -35,7 +35,10 @@ tasks:
   # One-shot bring-up: containers → wait healthy → warm-up sleep → migrate → build agent image.
   # The 5s sleep covers postgres's first-boot volume init, where pg_isready can flap.
   setup:
-    command: "bash -lc 'moon run server:docker-up && echo \"Waiting 5s for postgres warm-up...\" && sleep 5 && moon run server:migrate && moon run server:build-agent'"
+    command: "bash"
+    args:
+      - "-lc"
+      - "moon run server:docker-up && echo \"Waiting 5s for postgres warm-up...\" && sleep 5 && moon run server:migrate && moon run server:build-agent"
     options:
       runInCI: false
 
@@ -46,6 +49,11 @@ tasks:
 
   worker:
     command: "uv run celery --app src.celery_app worker --loglevel=info --queues=celery"
+    options:
+      runInCI: false
+
+  mcp:
+    command: "uv run python -m src.ai.mcp.server"
     options:
       runInCI: false
 

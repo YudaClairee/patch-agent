@@ -13,6 +13,8 @@ Covers:
 
 import uuid
 
+from src.core.config import settings
+
 
 # ---------------------------------------------------------------------------
 # POST /tasks — Normal flow
@@ -32,7 +34,7 @@ def test_create_task_normal(client, repository):
     assert response.status_code == 201
     data = response.json()
     assert data["status"] == "queued"
-    assert data["model_id"] == "anthropic/claude-sonnet-4.6"
+    assert data["model_id"] == settings.llm_model_id
     assert data["parent_run_id"] is None
     assert data["follow_up_instruction"] is None
 
@@ -70,7 +72,7 @@ def test_create_task_other_users_repo(client, other_repository):
 # ---------------------------------------------------------------------------
 
 
-def test_create_task_followup(client, repository, succeeded_agent_run):
+def test_create_task_followup(client, repository, agent_run_with_extras):
     """POST /tasks with parent_run_id reuses task, creates child run with 201."""
     response = client.post(
         "/tasks/",
@@ -78,15 +80,15 @@ def test_create_task_followup(client, repository, succeeded_agent_run):
             "repository_id": str(repository.id),
             "instruction": "Now also fix the tests",
             "target_branch": "main",
-            "parent_run_id": str(succeeded_agent_run.id),
+            "parent_run_id": str(agent_run_with_extras.id),
             "follow_up_instruction": "Also fix tests",
         },
     )
     assert response.status_code == 201
     data = response.json()
-    assert data["task_id"] == str(succeeded_agent_run.task_id)
-    assert data["parent_run_id"] == str(succeeded_agent_run.id)
-    assert data["branch_name"] == succeeded_agent_run.branch_name
+    assert data["task_id"] == str(agent_run_with_extras.task_id)
+    assert data["parent_run_id"] == str(agent_run_with_extras.id)
+    assert data["branch_name"] == agent_run_with_extras.branch_name
 
 
 def test_create_task_followup_non_succeeded_parent(client, repository, agent_run):
